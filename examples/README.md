@@ -1,31 +1,38 @@
 # Examples
 
-Synthetic **before → after** pair for teaching the AI (not a real game dump).
+Synthetic teaching pairs (not real game dumps).
 
-| File | What it shows |
-|------|----------------|
-| `before.lua` | Typical deobfuscator soup: banners, `v1`/`tbl4`/`Arg3`/`_l173`/`fn1`, pure junk (`bit32.bxor`, `type(123)`, `do end`) |
-| `after.lua` | Same behaviour as clean Roblox Luau: `GetService`, real names, no tool noise |
+| File | Difficulty | What it shows |
+|------|------------|----------------|
+| `before.lua` → `after.lua` | Medium | Banners, `v1`/`tbl4`/`Arg3`/`_l173`, a few junk lines |
+| `before_extreme.lua` → `after_extreme.lua` | **Hard** | Almost the **whole file** is unreadable: minified lines, `Arg3`/`Arg4`/`_l10`/`fn2`/`v22`, pure junk, packed logic |
 
-## Name map (for learning)
+## Extreme name map
 
 | Before | After |
 |--------|--------|
-| `v1` | `Players` |
-| `v2` | `RunService` |
-| `v3` | `ReplicatedStorage` |
-| `v4` | `UserInputService` |
+| `v1`…`v6` | `Players` … `Debris` (services) |
 | `tbl1` | `localPlayer` |
-| `tbl2` | `playerGui` |
-| `tbl3` | `remotes` |
-| `tbl4` | `config` |
-| `Arg1` | `combatEvent` |
-| `Arg2` | `dataFunction` |
-| `Arg3` | `fireCombat` |
-| `_l173` | `setupCharacter` |
-| `fn1` | `onInputBegan` |
-| `v5` | `DEFAULT_RANGE` |
-| `v6` | `walkSpeed` |
-| `v14` / `v15` / `v16` | `characterAddedConn` / `inputBeganConn` / `heartbeatConn` |
+| `tbl3` | `remotesFolder` |
+| `tbl4` | `state` |
+| `Arg1` | `hitRemote` |
+| `Arg2` | `syncRemote` |
+| `Arg3` | `swingAttack` |
+| `Arg4` | `onInputBegan` |
+| `_l10` | `getOrSet` |
+| `_l11` | `getHumanoidAndRoot` |
+| `_l99` | `requestBoot` |
+| `fn2` | `applyCharacterStats` |
+| `v22`/`v24`/`v25`/`v29` | connection locals |
 
-Use with [`../AI_PROMPT.md`](../AI_PROMPT.md): paste the prompt, then `before.lua`, and check the model against `after.lua`.
+## For the AI
+
+When the **entire** script looks like `before_extreme.lua`:
+
+1. Do not give up or only rename 3 variables.
+2. Walk top to bottom; rename **every** `v#` / `tbl#` / `Arg#` / `_l#` / `fn#`.
+3. Unpack minified lines into normal blocks.
+4. Delete only provable junk (`bit32` on constants, `type(123)`, empty `do end`).
+5. Keep behaviour identical.
+
+Paste [`../AI_PROMPT.md`](../AI_PROMPT.md), then `before_extreme.lua`, and compare to `after_extreme.lua`.
