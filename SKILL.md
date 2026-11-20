@@ -85,24 +85,15 @@ Full AI paste prompt lives in `AI_PROMPT.md`. Extreme teaching pair: `examples/b
 - Test changes against the sample set and check for regressions in other supported versions. Keep fixes focused; do not rewrite unrelated engines or add unnecessary features.
 - If an input is incomplete or only a behavior trace, clearly label that limitation instead of presenting it as recovered source.
 
-## Discord output option
+## Automatic Discord post-deobfuscation cleanup
 
-When the caller enables Discord output, format the completed deobfuscation result as a concise Discord message:
+When this skill is integrated into a Discord deobfuscation bot or workflow, run Beautify automatically after a deobfuscation engine successfully produces Lua output and before sending the result to the user.
 
-```md
-## {Obfuscator} Deobfuscated!
+1. Pass the completed deobfuscated Lua output through the Beautify workflow.
+2. Send the cleaned result as the normal Discord result, using the existing preview format where applicable.
+3. Attach the complete cleaned Lua file when the output is too large for a Discord message.
+4. If beautification fails, preserve and deliver the original deobfuscated output when possible, and clearly indicate that cleanup failed. Do not silently discard successful deobfuscation output.
+5. If the engine only produced a behavior trace, anti-tamper probes, or incomplete output, do not present it as a successfully recovered script.
+6. Keep this automatic cleanup optional for non-Discord integrations, and do not change the underlying deobfuscation engine or recovered script behavior.
 
-**Preview (first 5 lines):**
-
-```lua
-{first five lines of cleaned output}
-```
-
-... and {remaining line count} more!
-```
-
-- Use the detected obfuscator name when known; otherwise use a neutral title.
-- Show up to the first 5 lines as a preview and calculate the remaining line count accurately.
-- Keep the full cleaned Lua output available as a file or attachment when the Discord integration supports it. Do not truncate or replace the actual output with the preview.
-- If the output is too large for a Discord message, send the preview and attach the full file instead.
-- This is an optional presentation mode. Do not change the deobfuscation or beautification result.
+This section describes the integration behavior. The bot or application must actually call the Beautify script/module; adding this instruction alone does not implement the integration.
