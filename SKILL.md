@@ -101,29 +101,29 @@ This section describes the integration behavior. The bot or application must act
 
 ## Luraph bootstrap and anti-tamper cleanup
 
-Use DailyDeobf's Luraph cleanup as the concrete reference, especially `luraph-v15-engine/tidy.py` (`strip_preamble` / `preamble_plan`) and the trace cleanup in `luraph-v15.1-engine/src/tidy.js`.
+Clean recognizable Luraph-generated probe scaffolding from the beginning of successfully recovered output. Use structure-aware matching rather than deleting an arbitrary number of lines.
 
-### v15-style preamble removal
+### Remove generated preamble
 
-Do not just delete the first N lines. Detect the generated probe preamble by its structure:
+- Look for the characteristic generated `Instance.new("Path2D")` probe near the beginning of the file. Treat it as a strong signature only when it appears as part of the expected preamble structure.
+- Starting at the first non-comment, non-blank statement, remove only the contiguous sequence of recognized generated probe statements.
+- Recognize generated `ScreenGui` / `Frame` creation and layout, `Path2D` setup and calls, `ScreenGui:Destroy()`, generated connection disconnects, numeric-name `Folder` setup and `WaitForChild` checks, empty event callbacks for common instance events, and empty `task.spawn` / `task.defer` / `task.delay` callbacks.
+- Stop at the first statement that does not match a known probe pattern. Never jump over an unknown statement and continue deleting later code.
+- Preserve service bindings from the removed preamble only when the remaining script actually references them.
+- Remove generated attribution, promotional links, status comments, support-ticket text, and debug-library notices when they are comments or other clearly non-functional boilerplate.
+- Do not delete code merely because it mentions `Path2D`, `ScreenGui`, events, task scheduling, debugging, URLs, or Luraph.
 
-- Require the Luraph-style `Instance.new("Path2D")` signature near the beginning (DailyDeobf checks the first 60 lines).
-- Starting at the first non-comment, non-blank statement, remove only the contiguous sequence of recognized generated setup statements.
-- Recognize the known setup patterns: generated `ScreenGui` / `Frame` creation and layout, `Path2D` setup and calls, `ScreenGui:Destroy()`, generated connection disconnects, numeric-name `Folder` setup and `WaitForChild` checks, empty event callbacks for common instance events, and empty `task.spawn` / `task.defer` / `task.delay` callbacks.
-- Stop at the first statement that does not match the probe patterns. Do not skip over an unknown statement to keep deleting later code.
-- Preserve `GetService` bindings from the preamble only when the remaining script actually references them.
-- Keep real code after the probe sequence. Never remove a whole file merely because it contains `Path2D`, `ScreenGui`, event connections, or task scheduling.
+### Handle anti-tamper probes carefully
 
-### Anti-tamper handling
+- Prefer explicit deobfuscator trap-attribution metadata when available. If a specific generated probe function is identified, remove only that probe from the final recovered source.
+- When testing a suspected trap, compare execution with and without that specific function. If skipping it causes the script to stop earlier, treat it as a possible script-owned crash, licensing, or integrity check and retain the original behavior.
+- Remove generated trace markers and probe-only annotations from the normal recovered-source output.
+- Do not blindly remove user-authored debug logic, integrity checks, licensing, authentication, or environment checks. Only remove code confidently identified as generated anti-tamper/environment probing.
+- If the output contains only probes, or execution failed before reaching the payload, label it as diagnostic/incomplete. Never present a probe trace as recovered source.
 
-- Prefer the engine's trap attribution over guessing from source text. DailyDeobf instruments VM closures, records the triggered function ID, skips that specific function, and reruns.
-- If skipping a triggered function makes execution stop earlier, treat it as a possible script-owned crash/license check and retain the earlier run. Do not strip it as an environment probe.
-- Remove trace trigger markers and generated probe annotations from the delivered readable output.
-- Do not blindly remove all debug, integrity, licensing, authentication, or environment-check code. Only remove the recognizable generated preamble or code explicitly identified by the deobfuscation engine as a probe.
-- When the result is still only a probe trace or hits an environment-compatibility failure before payload execution, label it as diagnostic/incomplete rather than presenting it as recovered source.
+### Keep version-specific cleanup distinct
 
-### v15.1 implementation distinction
-
-DailyDeobf's v15.1 `src/tidy.js` has a narrower trace cleanup: it removes generated `--@` markers and trace annotations, then trims a preamble when it sees the known `Path2D:GetTangentOnCurveArcLength` or `ScreenGui:Destroy()` marker near the top. The separate `scripts/luau-cleaner.js` used on a v15.1 lifted candidate is a formatter with syntax validation and raw-output restoration; it is not the same Luraph-specific preamble remover.
-
-Beautify should apply its own safe, structure-aware cleanup to successful recovered source, not claim the existing v15.1 formatter already strips every Luraph probe.
+- For trace-style output, remove known generated markers and annotations, then trim the recognized preamble using the structural rules above.
+- For lifted source, run formatting and semantic cleanup separately. Validate the cleaned file with a Luau parser when available.
+- Keep a copy of the original output. If cleanup causes a syntax or structural validation failure, restore the original instead of delivering damaged code.
+- Do not assume a formatter alone removes the Luraph preamble or anti-tamper scaffolding.
