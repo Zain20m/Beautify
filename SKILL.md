@@ -99,19 +99,14 @@ When this skill is integrated into a Discord deobfuscation bot or workflow, run 
 This section describes the integration behavior. The bot or application must actually call the Beautify script/module; adding this instruction alone does not implement the integration.
 
 
-## Luraph bootstrap and banner cleanup
+## Luraph bootstrap and anti-tamper cleanup
 
-During automatic post-deobfuscation cleanup, remove recognizable Luraph/deobfuscator boilerplate that is only informational or promotional, so the result begins with the recovered script rather than tool-generated clutter.
+Follow the behavior already used by DailyDeobf's Luraph pipeline. This is more than deleting a few banner lines.
 
-Examples include:
-- Luraph promotional or attribution comments and links.
-- Deobfuscator status banners and generated notices.
-- Boilerplate messages such as "This debug library is needed on Luraph" and "create a ticket" support instructions.
-- Comments that only advertise a Discord server, support page, ticket system, or obfuscator website.
-
-Rules:
-- Match known boilerplate by its content and context; do not delete arbitrary comments just because they contain a URL, mention Luraph, or mention debugging.
-- Remove only non-functional comments, strings, and statements. If a bootstrap statement is required for the recovered script to run, preserve it.
-- Do not remove real debug logic, runtime dependencies, user code, authentication, integrity checks, or environment setup just because they resemble loader code.
-- If uncertain whether a line is generated boilerplate or required code, keep it.
-- Apply this cleanup after successful deobfuscation and before sending the cleaned result to Discord.
+- Remove the Luraph/deobfuscator preamble by default so the delivered file starts with recovered script logic. Keep-preamble behavior should remain an explicit diagnostic option, not the normal Discord result.
+- Remove known generated notices and promotional text, including Luraph links, attribution banners, and messages such as "The debug library is required on Luau platforms. Please open a support ticket."
+- Respect the engine's anti-tamper isolation and trap-attribution results. When the engine identifies an anti-tamper trap function and successfully reruns without that trap, exclude that proven probe-only function from the final recovered payload.
+- Remove only Luraph environment/anti-tamper probe code that the engine has identified as generated or proven unrelated to the payload. Do not use broad text matching or delete code just because it references `debug`, `Path2D`, `ChildAdded`, `DescendantRemoving`, `HttpService`, or other Roblox APIs.
+- Preserve actual payload code, required initialization, runtime dependencies, and user-authored checks. Some environment values can participate in Luraph's decryption key, so do not strip probes before the engine has finished recovery.
+- If the result is only a probe/anti-tamper shell or an environment-compatibility failure, label it as incomplete/probe-only. Do not pretend it is the recovered script.
+- Keep the cleanup after successful deobfuscation and before the Discord result is sent. If cleanup cannot confidently distinguish generated probes from payload logic, keep the code and report the limitation.
