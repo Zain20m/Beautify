@@ -101,12 +101,29 @@ This section describes the integration behavior. The bot or application must act
 
 ## Luraph bootstrap and anti-tamper cleanup
 
-Follow the behavior already used by DailyDeobf's Luraph pipeline. This is more than deleting a few banner lines.
+Use DailyDeobf's Luraph cleanup as the concrete reference, especially `luraph-v15-engine/tidy.py` (`strip_preamble` / `preamble_plan`) and the trace cleanup in `luraph-v15.1-engine/src/tidy.js`.
 
-- Remove the Luraph/deobfuscator preamble by default so the delivered file starts with recovered script logic. Keep-preamble behavior should remain an explicit diagnostic option, not the normal Discord result.
-- Remove known generated notices and promotional text, including Luraph links, attribution banners, and messages such as "The debug library is required on Luau platforms. Please open a support ticket."
-- Respect the engine's anti-tamper isolation and trap-attribution results. When the engine identifies an anti-tamper trap function and successfully reruns without that trap, exclude that proven probe-only function from the final recovered payload.
-- Remove only Luraph environment/anti-tamper probe code that the engine has identified as generated or proven unrelated to the payload. Do not use broad text matching or delete code just because it references `debug`, `Path2D`, `ChildAdded`, `DescendantRemoving`, `HttpService`, or other Roblox APIs.
-- Preserve actual payload code, required initialization, runtime dependencies, and user-authored checks. Some environment values can participate in Luraph's decryption key, so do not strip probes before the engine has finished recovery.
-- If the result is only a probe/anti-tamper shell or an environment-compatibility failure, label it as incomplete/probe-only. Do not pretend it is the recovered script.
-- Keep the cleanup after successful deobfuscation and before the Discord result is sent. If cleanup cannot confidently distinguish generated probes from payload logic, keep the code and report the limitation.
+### v15-style preamble removal
+
+Do not just delete the first N lines. Detect the generated probe preamble by its structure:
+
+- Require the Luraph-style `Instance.new("Path2D")` signature near the beginning (DailyDeobf checks the first 60 lines).
+- Starting at the first non-comment, non-blank statement, remove only the contiguous sequence of recognized generated setup statements.
+- Recognize the known setup patterns: generated `ScreenGui` / `Frame` creation and layout, `Path2D` setup and calls, `ScreenGui:Destroy()`, generated connection disconnects, numeric-name `Folder` setup and `WaitForChild` checks, empty event callbacks for common instance events, and empty `task.spawn` / `task.defer` / `task.delay` callbacks.
+- Stop at the first statement that does not match the probe patterns. Do not skip over an unknown statement to keep deleting later code.
+- Preserve `GetService` bindings from the preamble only when the remaining script actually references them.
+- Keep real code after the probe sequence. Never remove a whole file merely because it contains `Path2D`, `ScreenGui`, event connections, or task scheduling.
+
+### Anti-tamper handling
+
+- Prefer the engine's trap attribution over guessing from source text. DailyDeobf instruments VM closures, records the triggered function ID, skips that specific function, and reruns.
+- If skipping a triggered function makes execution stop earlier, treat it as a possible script-owned crash/license check and retain the earlier run. Do not strip it as an environment probe.
+- Remove trace trigger markers and generated probe annotations from the delivered readable output.
+- Do not blindly remove all debug, integrity, licensing, authentication, or environment-check code. Only remove the recognizable generated preamble or code explicitly identified by the deobfuscation engine as a probe.
+- When the result is still only a probe trace or hits an environment-compatibility failure before payload execution, label it as diagnostic/incomplete rather than presenting it as recovered source.
+
+### v15.1 implementation distinction
+
+DailyDeobf's v15.1 `src/tidy.js` has a narrower trace cleanup: it removes generated `--@` markers and trace annotations, then trims a preamble when it sees the known `Path2D:GetTangentOnCurveArcLength` or `ScreenGui:Destroy()` marker near the top. The separate `scripts/luau-cleaner.js` used on a v15.1 lifted candidate is a formatter with syntax validation and raw-output restoration; it is not the same Luraph-specific preamble remover.
+
+Beautify should apply its own safe, structure-aware cleanup to successful recovered source, not claim the existing v15.1 formatter already strips every Luraph probe.
