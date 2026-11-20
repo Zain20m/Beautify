@@ -97,3 +97,21 @@ When this skill is integrated into a Discord deobfuscation bot or workflow, run 
 6. Keep this automatic cleanup optional for non-Discord integrations, and do not change the underlying deobfuscation engine or recovered script behavior.
 
 This section describes the integration behavior. The bot or application must actually call the Beautify script/module; adding this instruction alone does not implement the integration.
+
+
+## Luraph bootstrap and banner cleanup
+
+During automatic post-deobfuscation cleanup, remove recognizable Luraph/deobfuscator boilerplate that is only informational or promotional, so the result begins with the recovered script rather than tool-generated clutter.
+
+Examples include:
+- Luraph promotional or attribution comments and links.
+- Deobfuscator status banners and generated notices.
+- Boilerplate messages such as "This debug library is needed on Luraph" and "create a ticket" support instructions.
+- Comments that only advertise a Discord server, support page, ticket system, or obfuscator website.
+
+Rules:
+- Match known boilerplate by its content and context; do not delete arbitrary comments just because they contain a URL, mention Luraph, or mention debugging.
+- Remove only non-functional comments, strings, and statements. If a bootstrap statement is required for the recovered script to run, preserve it.
+- Do not remove real debug logic, runtime dependencies, user code, authentication, integrity checks, or environment setup just because they resemble loader code.
+- If uncertain whether a line is generated boilerplate or required code, keep it.
+- Apply this cleanup after successful deobfuscation and before sending the cleaned result to Discord.
