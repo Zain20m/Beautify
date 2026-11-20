@@ -84,3 +84,25 @@ Full AI paste prompt lives in `AI_PROMPT.md`. Extreme teaching pair: `examples/b
 - Compare the script before and after cleanup. Preserve behavior, side effects, control flow, and all statements whose purpose is uncertain.
 - Test changes against the sample set and check for regressions in other supported versions. Keep fixes focused; do not rewrite unrelated engines or add unnecessary features.
 - If an input is incomplete or only a behavior trace, clearly label that limitation instead of presenting it as recovered source.
+
+## Discord output option
+
+When the caller enables Discord output, format the completed deobfuscation result as a concise Discord message:
+
+```md
+## {Obfuscator} Deobfuscated!
+
+**Preview (first 5 lines):**
+
+```lua
+{first five lines of cleaned output}
+```
+
+... and {remaining line count} more!
+```
+
+- Use the detected obfuscator name when known; otherwise use a neutral title.
+- Show up to the first 5 lines as a preview and calculate the remaining line count accurately.
+- Keep the full cleaned Lua output available as a file or attachment when the Discord integration supports it. Do not truncate or replace the actual output with the preview.
+- If the output is too large for a Discord message, send the preview and attach the full file instead.
+- This is an optional presentation mode. Do not change the deobfuscation or beautification result.
