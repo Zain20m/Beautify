@@ -76,3 +76,11 @@ Full AI paste prompt lives in `AI_PROMPT.md`. Extreme teaching pair: `examples/b
 - `AI_PROMPT.md` — copy into any AI for full rewrite
 - `rules/naming.md`, `rules/strip_list.md`
 - `examples/` — medium + extreme before/after
+
+## Output validation
+
+- Check the actual deobfuscated samples, not just a hand-picked example. Include different obfuscator versions and difficult outputs where available.
+- Separate deobfuscation failures from readability problems. Beautify can clean recovered Luau, but it cannot reconstruct source that the deobfuscator failed to recover.
+- Compare the script before and after cleanup. Preserve behavior, side effects, control flow, and all statements whose purpose is uncertain.
+- Test changes against the sample set and check for regressions in other supported versions. Keep fixes focused; do not rewrite unrelated engines or add unnecessary features.
+- If an input is incomplete or only a behavior trace, clearly label that limitation instead of presenting it as recovered source.
