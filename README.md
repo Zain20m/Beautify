@@ -2,67 +2,52 @@
 
 Turn messy **deobfuscated** Roblox / Luau into clean, readable source.
 
-Built for output from Luraph, IronBrew, generic VM lifts, and Discord deobf bots — strip tool junk, kill `tbl4` / `Arg4` / `_l173` names, keep real behaviour.
+Strips Luraph/deobf junk, kills `v1` / `tbl4` / `Arg4` / `_l173`, expands minified lines, renames from `GetService` / `LocalPlayer` / `WaitForChild` / `Connect`.
 
-## Quick start (AI)
+## Skill
 
-1. Open [`AI_PROMPT.md`](./AI_PROMPT.md).
-2. Copy the full prompt into ChatGPT / Claude / Grok / Cursor.
-3. Paste your deobfuscated `.lua` / `.luau` under it.
-4. Get clean Roblox-style Luau back.
+Agents load [`SKILL.md`](./SKILL.md).
 
-That path is the main product. The Python CLI is optional automation for the mechanical steps.
+## AI (best quality)
 
-## Quick start (CLI)
+1. Open [`AI_PROMPT.md`](./AI_PROMPT.md)
+2. Paste into any AI with your deobfuscated script
+3. Optional teaching pairs in [`examples/`](./examples/) (including **extreme** whole-file soup)
+
+## CLI (fast)
 
 ```bash
-python3 scripts/beautify.py input.lua -o output.lua
-python3 scripts/beautify.py input.lua --aggressive -o output.lua
+python3 scripts/beautify.py input.lua -o clean.lua
 ```
 
-What the CLI does:
+Default pass:
 
-- strips deobfuscator / Luraph tool banners
-- removes obvious pure junk statements
-- renames common garbage identifiers (`v1`, `tbl2`, `Arg3`, `_l10`, …) to stable readable locals
-- normalizes blank lines and light indentation
+- strip banners + pure junk
+- unpack minified `;local` walls
+- semantic rename (`Players`, `localPlayer`, `remotes`, `hitRemote`, `getHumanoidAndRoot`, `*Conn`)
+- fallback rename for leftover garbage idents
+- 4-space indent
 
-What the CLI does **not** do (use the AI prompt for these):
-
-- deep semantic renames (`v12` → `humanoid` from context)
-- control-flow redesign
-- recovering missing logic from traces
+```bash
+python3 scripts/beautify.py input.lua --no-semantic -o clean.lua  # rename only, no usage hints
+```
 
 ## Layout
 
 ```
-AI_PROMPT.md          ← paste this into any AI (primary workflow)
-README.md
-rules/
-  naming.md           ← rename conventions
-  strip_list.md       ← what to delete vs keep
-scripts/
-  beautify.py         ← mechanical cleaner
-examples/
-  before.lua
-  after.lua
+SKILL.md
+AI_PROMPT.md
+scripts/beautify.py
+rules/naming.md
+rules/strip_list.md
+examples/before.lua | after.lua
+examples/before_extreme.lua | after_extreme.lua
 ```
 
-## Tips for best results
+## Discord / deobf bots
 
-1. Run **CLI first**, then **AI prompt** on the result.
-2. If the file is only `-- N statements recorded` / `DescendantAdded` probes, it is **not source** — do not force a fake script.
-3. Keep executor dumps and real lifted bodies; do not mix in harness-only fingerprints as gameplay.
-4. After AI rename, skim remotes and `GetService` names — those are the highest-value reads.
-
-## For Discord / deobf bots
-
-After every successful deobfuscation:
-
-1. Pipe through `scripts/beautify.py`.
-2. Optionally run the AI prompt for semantic names.
-3. Ship the cleaned file to the user — never ship raw `tbl4` soup when avoidable.
+After every deobfuscation, pipe through `scripts/beautify.py` before sending to users.
 
 ## License
 
-MIT — use in bots, tools, and private pipelines.
+MIT
