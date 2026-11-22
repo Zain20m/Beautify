@@ -100,14 +100,14 @@ local function fn2() local v2=3;return v2 end
     if localValue then
         return false
     else
-        local localValue = 2
-        print(localValue)
+        local localValue2 = 2
+        print(localValue2)
     end
 end
 
 local function eventHandler2()
-    local localValue2 = 3
-    return localValue2
+    local localValue3 = 3
+    return localValue3
 end""", result)
         self.assertNotRegex(result, r"(?m)^        (?:end|else|elseif)\s*$")
         self.assertNotRegex(result, r"(?m)^.*[ \t]+$")
