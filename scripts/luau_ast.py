@@ -455,6 +455,10 @@ def build_ast_bindings(source: str, all_tokens: list, binding_type, scope_type, 
         diagnostics.append(
             f"Tree-sitter recovered a partial Luau AST with {len(syntax_nodes)} syntax-error node(s)."
         )
+        for detail in syntax_error_details:
+            diagnostics.append(
+                f"AST syntax {detail['node_type']} at line {detail['line']}: {detail['excerpt']}"
+            )
     for node in function_nodes:
         body = node.child_by_field_name("body")
         start = body.start_byte if body is not None else node.start_byte
