@@ -143,8 +143,14 @@ def _is_reference_identifier(node) -> bool:
         return False
     if parent.type == "for_numeric_clause" and _field_is(parent, node, "name"):
         return False
-    if parent.type == "function_declaration" and _field_is(parent, node, "name"):
-        return False
+    ancestor = parent
+    while ancestor is not None and ancestor.type not in ("block", "chunk", "function_definition"):
+        if ancestor.type == "function_declaration":
+            name_node = ancestor.child_by_field_name("name")
+            if name_node is not None and name_node.start_byte <= node.start_byte and node.end_byte <= name_node.end_byte:
+                return False
+            break
+        ancestor = ancestor.parent
     if parent.type == "generic_type_list":
         return False
     if parent.type == "attribute":
@@ -256,7 +262,7 @@ def build_ast_bindings(source: str, all_tokens: list, binding_type, scope_type, 
                 )
 
         name_node = node.child_by_field_name("name")
-        if local_function and name_node is not None and name_node.type == "identifier":
+        if local_function and name_node is not None:
             add_binding(name_node, scope, "local", char_pos(name_node.start_byte), node)
         elif name_node is not None:
             visit(name_node, scope)
@@ -437,11 +443,12 @@ def build_ast_bindings(source: str, all_tokens: list, binding_type, scope_type, 
         start = error_node.start_byte
         end = max(start + 1, error_node.end_byte)
         excerpt = raw[start:min(len(raw), end + 60)].decode("utf-8", errors="replace")
-        syntax_error_details.append({
+        detail = {
             "node_type": error_node.type,
             "line": error_node.start_point.row + 1,
             "excerpt": excerpt[:180],
-        })
+        }
+        syntax_error_details.append(detail)
 
     diagnostics = []
     if syntax_nodes:
@@ -463,7 +470,7 @@ def build_ast_bindings(source: str, all_tokens: list, binding_type, scope_type, 
     devirtualization_markers = [
         {"line": line_number, "text": line.strip()}
         for line_number, line in enumerate(source.splitlines(), start=1)
-        if re.search(r"\\bdevirt\\s*:", line, re.IGNORECASE)
+        if re.search(r"\bdevirt\s*:", line, re.IGNORECASE)
     ]
     metadata = {
         "ast_backend": "tree-sitter-luau",
