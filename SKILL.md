@@ -3,7 +3,7 @@ name: beautify
 description: Clean already-deobfuscated Roblox Luau using scope-aware renaming, conservative junk removal, formatting, and structural diagnostics.
 license: MIT
 metadata:
-  version: "3.0"
+  version: "3.1"
   focus: roblox-luau-deobf-cleanup
 ---
 
@@ -36,10 +36,10 @@ Then inspect the report and output. Keep the original deobfuscator output unchan
 2. Tracks approximate lexical scopes for locals, function parameters, and loop variables.
 3. Renames generated identifiers by binding, so shadowed variables are not globally replaced together.
 4. Uses nearby API and function context to suggest names such as `Players`, `localPlayer`, `humanoid`, `rootPart`, `inputBeganConn`, or `activateNpcPrompts`.
-5. Infers known Roblox service aliases only when a bare service identifier is otherwise unbound.
-6. Expands semicolon chains and common inline blocks, normalizes assignment / comma spacing, and applies indentation.
+5. Infers known Roblox service aliases only when a bare service identifier is otherwise unbound, then reuses any in-scope service local instead of repeating `game:GetService(...)` calls.
+6. Expands semicolon chains and common inline blocks, normalizes binary operator spacing, and separates top-level helper functions.
 7. Removes only narrowly recognized tool banners, pure constant-expression noise, and empty `do end` padding.
-8. Reports unmatched `end` / `until` tokens and remaining generated-name patterns.
+8. Reports unmatched `end` / `until` tokens and unbound generated-looking identifiers. Unbound names are not renamed automatically because they may be globals or missing devirtualized upvalues.
 
 The scope tracker is intentionally conservative and is not a complete Luau AST or compiler.
 
