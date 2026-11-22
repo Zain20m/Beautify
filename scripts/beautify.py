@@ -1038,15 +1038,18 @@ def strip_unused_generated_literals(source: str) -> tuple[str, int]:
     return source, len(removals)
 
 
-def strip_pure_junk(source: str) -> str:
+def strip_pure_junk(source: str, return_count: bool = False):
     """Remove only explicit banners, no-op padding, and standalone pure constants."""
+    lines = source.splitlines()
     kept = [
-        line for line in source.splitlines()
+        line for line in lines
         if not PURE_STMT_RE.match(line) and not EMPTY_DO_RE.match(line)
     ]
+    removed_statements = len(lines) - len(kept)
     source = "\n".join(kept)
-    source, _ = strip_unused_generated_literals(source)
-    return source
+    source, removed_literals = strip_unused_generated_literals(source)
+    removed_count = removed_statements + removed_literals
+    return (source, removed_count) if return_count else source
 
 
 def split_semicolons(source: str) -> str:
@@ -1425,7 +1428,7 @@ def beautify(
     source = split_semicolons(source)
     source = split_control_blocks(source)
     source = normalize_spacing(source)
-    source = strip_pure_junk(source)
+    source, removed_junk = strip_pure_junk(source, return_count=True)
 
     rename_stats: dict[str, int] = {}
     diagnostics: list[str] = []
@@ -1497,6 +1500,7 @@ def beautify(
     )
     report = {
         "renamed_bindings": sum(rename_stats.values()),
+        "removed_junk_statements": removed_junk,
         "renamed_names": len(rename_stats),
         "inferred_services": inferred_services,
         "canonicalized_service_calls": canonicalized_service_calls,
