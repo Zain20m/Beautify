@@ -192,7 +192,7 @@ print(v2)
         result, report = beautify.beautify(source, return_report=True, formatter="fallback")
         self.assertNotIn("local v1", result)
         self.assertIn("doWork()", result)
-        self.assertIn("print(value)", result)
+        self.assertIn("print(localValue)", result)
         self.assertEqual(report["removed_junk_statements"], 1)
 
     def test_pure_cleanup_does_not_drop_effectful_table_pack_arguments(self):
