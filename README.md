@@ -1,18 +1,28 @@
 # Beautify
 
-Clean and semantically rename already-deobfuscated Roblox / Luau.
+Clean, semantically rename, and format already-deobfuscated Roblox / Luau.
 
-Beautify builds a scope-aware binding map, improves generated and intermediate names from Roblox API usage and function behavior, removes only provably inert junk, then formats the whole file with StyLua when installed. A conservative fallback handles malformed or incomplete decompiler output.
+Beautify uses a Tree-sitter Luau syntax tree for lexical-scope analysis when the AST dependencies are installed. It resolves local declarations, local functions, parameters, loop variables, nested blocks, and shadowed names by their bindings. It scores function-name suggestions from AST call/member/string evidence, formats valid source through StyLua, and retains a conservative fallback for incomplete decompiler output.
 
 ## What it does
 
-- Renames locals, local functions, callback parameters, and loop variables by lexical binding, so shadowed variables stay separate.
-- Improves both obfuscator names (`v12`, `tbl4`, `Arg2`, `_l173`, `fn3`) and generic names from an earlier beautification pass (`handleEvent`, `sendRemoteEvent`, `value12`).
-- Infers function names from their full body and API usage, and value names from constructors, assignments, properties, and callback roles.
-- Reuses service aliases when the same service is requested again and the alias is in scope.
-- Removes only recognized banners, empty `do end` padding, standalone pure constant calls, and unused generated locals initialized with literal-only values.
-- Formats full Luau files, including expressions, callbacks, tables, method chains, operators, and control flow.
-- Reports parser failures, unmatched blocks, unresolved generated globals/upvalues, and removed junk counts.
+- AST-backed binding resolution for locals, local functions, callback parameters, generic/numeric loop variables, nested blocks, and repeat scopes.
+- Contextual naming for obfuscator names and earlier Beautify placeholders, using function bodies, AST calls/members, constructors, reference sites, and callback context.
+- Confidence/evidence fields for semantic name suggestions, with neutral fallbacks when evidence is weak.
+- Service alias reuse when the original local is visible and not shadowed.
+- Safe junk removal limited to known banners, empty padding, standalone pure constants, and unused generated locals initialized only by literals.
+- Whole-file formatting via StyLua for valid Luau; best-effort formatting for malformed or partially recovered output.
+- Partial-function, syntax-node, unresolved generated-name, possible missing-upvalue/external-global, and devirtualization-marker diagnostics.
+
+## Install
+
+Install the AST and formatter dependencies:
+
+```bash
+python3 -m pip install -r requirements.txt
+```
+
+StyLua is pinned by the CI workflow. For local formatting, install StyLua 2.6.0 or newer and ensure `stylua` is on PATH.
 
 ## CLI
 
@@ -24,39 +34,39 @@ Options:
 
 - `--formatter auto`: use StyLua when installed; otherwise use the built-in fallback.
 - `--formatter stylua`: require StyLua's Luau parser and fail if it rejects the source.
-- `--formatter fallback`: force best-effort formatting for malformed output.
-- `--no-semantic`: disable contextual naming and use neutral renames.
-- `--report`: print rename counts, removed-junk counts, inferred service aliases, formatter details, and structural diagnostics.
+- `--formatter fallback`: force best-effort formatting for damaged decompiler output.
+- `--no-semantic`: disable contextual naming.
+- `--report`: include rename counts, parser backend, AST scope count, syntax-error nodes, partial functions, possible missing upvalues, unresolved generated names, junk removals, and formatting details.
 
-## Full formatter
-
-Install StyLua:
-
-```bash
-pip install git+https://github.com/JohnnyMorganz/StyLua@v2.6.0
-```
-
-The checked-in `.stylua.toml` selects four-space Luau formatting. StyLua parses and formats complete valid Luau. The fallback is only a best-effort option for malformed decompiler output.
-
-## Tests
+## Tests and fixtures
 
 ```bash
 python3 -m unittest discover -s tests -v
 ```
 
-Regression coverage includes lexical shadowing, callback parameters, semantic function naming, literal preservation, service alias reuse, full formatting, safe junk removal, and malformed-input diagnostics.
+The regression suite covers AST shadowing, loops and repeat scopes, typed/generic Luau, closure/string-pool patterns, representative register-style decompiler output, malformed function bodies, missing-upvalue placeholders, contextual names, service alias reuse, full formatting, and safe junk removal.
 
-## Limits
+The files under `tests/fixtures/` are representative synthetic fixtures. They test parsing and recovery patterns; they are not claimed to be complete samples from every proprietary obfuscator.
 
-Beautify is not a VM devirtualizer and cannot reconstruct missing expressions or function bodies. It does not guess names for unbound globals or missing upvalues. A fallback-formatted file with unmatched block tokens is still incomplete source.
+## Recovery and safety limits
 
-## Skill and prompt
+Beautify is not a VM devirtualizer. It cannot reconstruct missing bytecode, missing expressions, or lost function bodies. AST syntax errors are reported with source locations; functions containing errors are marked partial. Unbound generated-looking references inside functions are reported as possible missing upvalues or external globals. Beautify does not invent definitions for them.
 
-Agents load [SKILL.md](./SKILL.md). The deeper AI-assisted naming and formatting guidance is in [AI_PROMPT.md](./AI_PROMPT.md). Examples are under [examples/](./examples/).
+The AST backend is preferred when installed. If it is missing or fails, the token-based scope tracker remains available and the report identifies the fallback backend.
+
+## Repository
+
+- `scripts/beautify.py`: CLI, semantic naming, cleanup, and formatting.
+- `scripts/luau_ast.py`: Tree-sitter Luau scope and recovery analysis.
+- `requirements.txt`: pinned AST dependencies.
+- `SKILL.md`: agent skill and workflow.
+- `AI_PROMPT.md`: full-file assisted-cleanup guidance.
+- `rules/naming.md`: naming policy.
+- `tests/`: regression suite and parser fixtures.
 
 ## Bot integration
 
-After a deobfuscator returns Lua text, a bot may run `scripts/beautify.py` before delivery. Preserve the original output as a fallback. Do not present behavior traces or malformed fragments as successfully recovered source.
+After a deobfuscator produces Lua, a bot may run Beautify before delivery. Preserve the original deobfuscator output as a fallback. Label traces and partial output honestly; formatting a broken dump does not make missing source recoverable.
 
 ## License
 
