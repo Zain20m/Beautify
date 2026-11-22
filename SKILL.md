@@ -3,7 +3,7 @@ name: beautify
 description: AST-aware whole-file semantic renaming, formatting, and conservative cleanup for already-deobfuscated Roblox Luau.
 license: MIT
 metadata:
-  version: "6.0"
+  version: "6.1"
   focus: roblox-luau-ast-cleanup
 ---
 
@@ -20,7 +20,7 @@ python3 scripts/beautify.py input.lua -o clean.lua --report --formatter auto
 
 - `--formatter auto`: use StyLua when installed; otherwise use fallback formatting.
 - `--formatter stylua`: require StyLua and parser validation.
-- `--formatter fallback`: force conservative best-effort formatting.
+- `--formatter fallback`: use conservative best-effort formatting for damaged output.
 
 ## AST-backed scope analysis
 
@@ -73,9 +73,9 @@ Use StyLua's Luau parser/printer for valid source. Format expressions, callbacks
 python3 -m unittest discover -s tests -v
 ```
 
-CI installs pinned AST dependencies and StyLua, runs regression tests, then smoke-tests the example files.
+CI runs the regression suite, deterministic generated-input invariants, and example smoke tests on Python 3.10, 3.11, and 3.12.
 
-The fixture corpus contains representative synthetic patterns for register-style output, string-pool/closures, typed Luau, and partial lifter output. It does not establish universal compatibility with every real-world obfuscator.
+The fixture corpus contains representative synthetic patterns for register-style output, string-pool/closures, typed Luau, and partial lifter output. Generated tests exercise nested scopes and output stability, but neither synthetic fixtures nor generated cases establish universal compatibility with every real-world obfuscator. Add sanitized real-world failures as regression fixtures.
 
 ## Output expectations
 
