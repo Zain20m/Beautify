@@ -247,7 +247,22 @@ def build_ast_bindings(source: str, all_tokens: list, binding_type, scope_type, 
                 visit(child, scope)
 
     def visit_function(node, scope):
-        local_function = node.type == "function_declaration" and _is_local_function(node, raw)
+        node_index = token_index(node)
+        function_index = node_index
+        local_function = False
+        if node.type in ("function_declaration", "function_definition") and node_index is not None:
+            if tokens[node_index].value == "local":
+                local_function = (
+                    node_index + 1 < len(tokens)
+                    and tokens[node_index + 1].value == "function"
+                )
+                if local_function:
+                    function_index = node_index + 1
+            elif tokens[node_index].value == "function":
+                local_function = (
+                    node_index > 0 and tokens[node_index - 1].value == "local"
+                )
+
         name_node = node.child_by_field_name("name")
         if local_function and name_node is not None and name_node.type == "identifier":
             add_binding(name_node, scope, "local", char_pos(name_node.start_byte), node)
@@ -271,14 +286,13 @@ def build_ast_bindings(source: str, all_tokens: list, binding_type, scope_type, 
                 if parameter_name is not None:
                     add_binding(parameter_name, function_scope, "parameter", active_from)
 
-        fn_index = token_index(node)
-        function_scope.function_token = fn_index
+        function_scope.function_token = function_index
         function_end_char = char_pos(node.end_byte)
         function_scope.function_end = max(
             (index for index, token in enumerate(tokens) if token.end <= function_end_char),
-            default=fn_index or 0,
+            default=function_index or 0,
         )
-        function_scope.function_context = function_context(tokens, fn_index) if fn_index is not None else ""
+        function_scope.function_context = function_context(tokens, function_index) if function_index is not None else ""
         visit_block_contents(body, function_scope)
 
     def visit_for(node, scope):
