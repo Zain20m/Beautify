@@ -1,27 +1,14 @@
---!strict
-type PlayerRecord = {
-    name: string,
-    userId: number,
-}
+-- Valid generic Luau functions with typed locals and loop bindings.
+local function identity<T>(value: T): T
+    return value
+end
 
-local function fn3<T>(
-    items: {T},
-    predicate: (T) -> boolean
-): {T}
+local function copyAll<T>(items: {T}): {T}
     local result: {T} = {}
-    for _, v1 in ipairs(items) do
-        if predicate(v1) then
-            table.insert(result, v1)
-        end
+    for _, item in ipairs(items) do
+        table.insert(result, identity(item))
     end
     return result
 end
 
-local values = { 1, 2, 3 }
-repeat
-    local v2 = table.remove(values)
-until v2 == nil
-
-return fn3(values, function(item)
-    return item ~= nil
-end)
+return copyAll({ 1, 2, 3 })
