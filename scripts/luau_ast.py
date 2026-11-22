@@ -102,7 +102,7 @@ def _is_local_function(node, raw: bytes) -> bool:
     if parent is None or parent.type != "declaration":
         return False
     declaration_text = _text(parent, raw).lstrip()
-    return bool(re.match(r"^local\\s+function\\b", declaration_text))
+    return bool(re.match(r"^local\s+function\b", declaration_text))
 
 
 def _inside_type(node) -> bool:
