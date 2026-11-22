@@ -476,7 +476,7 @@ def build_bindings(source: str, all_tokens: list[Token]) -> tuple[list[Token], l
                     if tokens[j].kind == "ident" and (j == i + 1 or tokens[j - 1].value == ","):
                         names.append((tokens[j].value, j))
                     j += 1
-            stack.append(Block("loop_wait", current, header_start=i, loop_names=names))
+            stack.append(Block("loop_wait", current, loop_names=names))
         elif v == "do":
             if stack and stack[-1].kind == "loop_wait":
                 block = stack[-1]
@@ -725,14 +725,7 @@ def infer_semantic_value_name(
     if "selectedworkouts.value" in low:
         return "selectedWorkoutName"
 
-    # Infer the object type from the properties the binding is read through.
-    refs = binding.refs
-    if refs:
-        properties = {
-            tokens_value
-            for ref in refs
-            for tokens_value in ()
-        }
+    # Infer the object type from the properties used in this binding's context.
     if ".health" in low and (".walkspeed" in low or ".jumppower" in low):
         return "humanoid"
     if ".userid" in low and ".character" in low:
