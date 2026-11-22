@@ -261,6 +261,7 @@ def build_ast_bindings(source: str, all_tokens: list, binding_type, scope_type, 
         body = node.child_by_field_name("body")
         parameters = node.child_by_field_name("parameters")
         active_from = char_pos(body.start_byte) if body is not None else char_pos(node.end_byte)
+        function_scope.start = active_from
         if parameters is not None:
             for parameter in parameters.named_children:
                 if parameter.type != "parameter":
