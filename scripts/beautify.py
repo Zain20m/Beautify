@@ -1,205 +1,881 @@
 #!/usr/bin/env python3
-"""Beautify deobfuscated Roblox / Luau (mechanical + light semantic)."""
+"""Scope-aware Roblox/Luau beautifier for already-deobfuscated source.
+
+This is a conservative source cleaner: it renames local bindings and parameters,
+formats whitespace/indentation, and removes only narrowly proven tool noise.
+It does not reconstruct missing VM logic or change runtime behavior intentionally.
+"""
 from __future__ import annotations
-import argparse, re, sys
+
+import argparse
+import re
+import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
 BANNER_RE = re.compile(
-    r"^\s*--\s*("
-    r"Deobfuscated by|Detected obfuscation|Local names are inferred|"
-    r"NOTE:\s*reconstructed|DAILY DEOBF|BEHAVIOUR TRACE ONLY|"
-    r"run status:|\d+\s+statements recorded|URLs requested:|"
-    r"anti-tamper trap|source:\s|during the trace|"
-    r"Full devirtualization did not|The VM lifter did not|"
+    r"^\s*--\s*(Deobfuscated by|Detected obfuscation|Local names are inferred|"
+    r"NOTE:\s*reconstructed|DAILY DEOBF|BEHAVIOUR TRACE ONLY|run status:|"
+    r"\d+\s+statements recorded|URLs requested:|anti-tamper trap|source:\s|"
+    r"during the trace|Full devirtualization did not|The VM lifter did not|"
     r"Lines below are runtime probes|If protos\.json was written|"
-    r"Beautified from deobfuscator|NOT SOURCE:|={5,}"
-    r").*$",
-    re.I,
+    r"Beautified from deobfuscator|NOT SOURCE:|={5,}).*$", re.I
 )
 PURE_STMT_RE = re.compile(
-    r"^\s*(?:"
-    r"bit32\.\w+\s*\([^;]*\)|"
+    r"^\s*(?:bit32\.\w+\s*\([^;]*\)|"
     r"(?:type|typeof|tostring|tonumber)\s*\(\s*(?:\d+|true|false|nil|\"[^\"]*\"|'[^']*')\s*\)|"
-    r"table\.pack\s*\([^;]*\)"
-    r")\s*;?\s*$"
+    r"table\.pack\s*\([^;]*\))\s*;?\s*$"
 )
 EMPTY_DO_RE = re.compile(r"^\s*do\s*end\s*;?\s*$")
+
+# Rename only local bindings with weak/generated names. The second group catches
+# common decompiler leftovers which the old v#/tbl#/Arg# matcher missed.
 GARBAGE_IDENT = re.compile(
-    r"\b(v\d+|u\d+|p\d+|a\d+|r\d+|t\d+|f\d+|fn\d+|tbl\d*|Arg\d+|arg\d+|var_\d+|_l\d+|L_\d+|loc\d+)\b"
+    r"^(?:v\d*|u\d+|p\d+|a\d+|r\d+|t\d+|t_\d+|f\d+|fn\d+|tbl\d*|arg|"
+    r"Arg\d+|arg\d+|var_\d+|_l\d+|[A-Z]_\d+|L_\d+|loc\d+|PROTO_\d+|"
+    r"STACK\d*|REGISTER\d*|R\d+|n\d*|flag\d*|thread\d*|connection\d*|"
+    r"lib\d*|tween\d*|paragraph\d*|cFrame)$", re.I
 )
-RESERVED = {
-    "game","workspace","script","shared","plugin","Enum","Axes","Faces","Color3","Vector2",
-    "Vector3","CFrame","UDim","UDim2","Rect","Region3","BrickColor","Ray","Instance","task",
-    "coroutine","buffer","bit32","string","table","math","utf8","os","debug","ipairs","pairs",
-    "next","pcall","xpcall","type","typeof","tostring","tonumber","print","warn","error",
-    "assert","select","unpack","rawget","rawset","rawequal","rawlen","setmetatable",
-    "getmetatable","newproxy","require","tick","time","wait","delay","spawn","getfenv",
-    "setfenv","loadstring","load","self","_G","and","or","not","if","then","else","elseif",
-    "end","for","while","repeat","until","function","local","return","break","continue",
-    "in","true","false","nil",
+
+KEYWORDS = {
+    "and", "break", "continue", "do", "else", "elseif", "end", "false",
+    "for", "function", "if", "in", "local", "nil", "not", "or", "repeat",
+    "return", "then", "true", "until", "while", "type",
 }
+RESERVED = KEYWORDS | {
+    "game", "workspace", "script", "shared", "plugin", "Enum", "Axes", "Faces",
+    "Color3", "Vector2", "Vector3", "CFrame", "UDim", "UDim2", "Rect", "Region3",
+    "BrickColor", "Ray", "Instance", "task", "coroutine", "buffer", "bit32",
+    "string", "table", "math", "utf8", "os", "debug", "ipairs", "pairs", "next",
+    "pcall", "xpcall", "typeof", "tostring", "tonumber", "print", "warn", "error",
+    "assert", "select", "unpack", "rawget", "rawset", "rawequal", "rawlen",
+    "setmetatable", "getmetatable", "newproxy", "require", "tick", "time", "wait",
+    "delay", "spawn", "getfenv", "setfenv", "loadstring", "load", "self", "_G",
+}
+
 SERVICE_NAMES = {
-    "Players","RunService","ReplicatedStorage","ReplicatedFirst","ServerStorage",
-    "ServerScriptService","StarterGui","StarterPack","StarterPlayer","UserInputService",
-    "TweenService","HttpService","Debris","Lighting","CollectionService","MarketplaceService",
-    "TeleportService","PathfindingService","PhysicsService","SoundService","TextService",
-    "Chat","Teams","Workspace","DataStoreService","MemoryStoreService","MessagingService",
-    "ProximityPromptService","ContextActionService","GuiService","GroupService","PolicyService",
+    "Players", "RunService", "ReplicatedStorage", "ReplicatedFirst", "ServerStorage",
+    "ServerScriptService", "StarterGui", "StarterPack", "StarterPlayer", "UserInputService",
+    "TweenService", "HttpService", "Debris", "Lighting", "CollectionService",
+    "MarketplaceService", "TeleportService", "PathfindingService", "PhysicsService",
+    "SoundService", "TextService", "Chat", "Teams", "Workspace", "DataStoreService",
+    "MemoryStoreService", "MessagingService", "ProximityPromptService", "ContextActionService",
+    "GuiService", "GroupService", "PolicyService", "VirtualInputManager",
 }
 
-def strip_banners(text: str) -> str:
-    return "\n".join(l for l in text.splitlines() if not BANNER_RE.match(l))
+CHILD_NAMES = {
+    "HumanoidRootPart": "humanoidRootPart", "PlayerGui": "playerGui", "Remotes": "remotes",
+    "Humanoid": "humanoid", "Hit": "hitRemote", "Sync": "syncRemote",
+    "CombatEvent": "combatEvent", "DataFunction": "dataFunction", "Backpack": "backpack",
+    "Character": "character", "leaderstats": "leaderstats", "Main": "mainFrame",
+    "MainMenu": "mainMenu", "requests": "requestsFolder",
+}
 
-def strip_pure_junk(text: str) -> str:
-    out = []
-    for line in text.splitlines():
-        if PURE_STMT_RE.match(line) or EMPTY_DO_RE.match(line):
+
+@dataclass
+class Token:
+    value: str
+    kind: str
+    start: int
+    end: int
+    line: int
+
+
+@dataclass
+class Binding:
+    name: str
+    token_index: int
+    scope: "Scope"
+    active_from: int
+    role: str = "local"
+    hint: str | None = None
+    new_name: str | None = None
+    refs: list[int] = field(default_factory=list)
+    function_body: str = ""
+    function_context: str = ""
+
+
+@dataclass
+class Scope:
+    parent: "Scope | None"
+    start: int
+    end: int = 10**18
+    bindings: list[Binding] = field(default_factory=list)
+    label: str = "block"
+    function_token: int | None = None
+    function_end: int | None = None
+
+
+@dataclass
+class Block:
+    kind: str
+    parent_scope: Scope
+    scope: Scope | None = None
+    header_start: int = -1
+    loop_names: list[tuple[str, int]] = field(default_factory=list)
+
+
+def _long_bracket_end(source: str, start: int) -> int | None:
+    m = re.match(r"\[(=*)\[", source[start:])
+    if not m:
+        return None
+    closer = "]" + m.group(1) + "]"
+    end = source.find(closer, start + len(m.group(0)))
+    return len(source) if end < 0 else end + len(closer)
+
+
+def lex(source: str) -> list[Token]:
+    """Tokenize Lua/Luau without interpreting strings or comments as code."""
+    out: list[Token] = []
+    i, line, n = 0, 1, len(source)
+    while i < n:
+        ch = source[i]
+        if ch in " \t\r\f\v":
+            i += 1
             continue
-        out.append(line)
-    return "\n".join(out)
+        if ch == "\n":
+            line += 1
+            i += 1
+            continue
+        start, start_line = i, line
+        if source.startswith("--", i):
+            long_end = _long_bracket_end(source, i + 2)
+            if long_end is not None:
+                value = source[i:long_end]
+                line += value.count("\n")
+                i = long_end
+            else:
+                end = source.find("\n", i)
+                i = n if end < 0 else end
+                value = source[start:i]
+            out.append(Token(value, "comment", start, i, start_line))
+            continue
+        if ch in "\"'":
+            quote = ch
+            i += 1
+            while i < n:
+                if source[i] == "\\":
+                    i += 2
+                    continue
+                if source[i] == quote:
+                    i += 1
+                    break
+                if source[i] == "\n":
+                    line += 1
+                i += 1
+            out.append(Token(source[start:i], "string", start, i, start_line))
+            continue
+        long_end = _long_bracket_end(source, i)
+        if long_end is not None:
+            value = source[i:long_end]
+            line += value.count("\n")
+            i = long_end
+            out.append(Token(value, "string", start, i, start_line))
+            continue
+        if ch.isalpha() or ch == "_":
+            i += 1
+            while i < n and (source[i].isalnum() or source[i] == "_"):
+                i += 1
+            out.append(Token(source[start:i], "keyword" if source[start:i] in KEYWORDS else "ident", start, i, start_line))
+            continue
+        if ch.isdigit():
+            i += 1
+            while i < n and (source[i].isalnum() or source[i] in "._"):
+                if source.startswith("..", i):
+                    break
+                i += 1
+            out.append(Token(source[start:i], "number", start, i, start_line))
+            continue
+        op = next((x for x in ("...", "..=", "//", "==", "~=", "<=", ">=", "::", "..", "+=", "-=", "*=", "/=", "%=", "^=") if source.startswith(x, i)), None)
+        if op:
+            i += len(op)
+            out.append(Token(op, "operator", start, i, start_line))
+        else:
+            i += 1
+            out.append(Token(ch, "punct", start, i, start_line))
+    return out
 
-def unpack_minified(text: str) -> str:
-    text = re.sub(r";\s*(?=(?:local|function|end|if|for|while|repeat|return|do|else|elseif)\b)", ";\n", text)
-    text = re.sub(r";\s*(?=local\s+)", ";\n", text)
-    text = re.sub(r"\)\s*(?=local\s+)", ")\n", text)
-    text = re.sub(r"\bend\s*(?=local\s+)", "end\n", text)
-    text = re.sub(r"\bend\s*(?=function\s+)", "end\n", text)
-    text = re.sub(r"\)\s*(?=function\s+)", ")\n", text)
-    return text
 
-def collapse_blank_lines(text: str) -> str:
-    return re.sub(r"\n{3,}", "\n\n", text).strip() + "\n"
+def significant(tokens: list[Token]) -> list[Token]:
+    return [t for t in tokens if t.kind != "comment"]
 
-def light_indent(text: str) -> str:
-    out, depth = [], 0
-    dec_before = re.compile(r"^\s*(end|until|else|elseif)\b", re.I)
-    for raw in text.splitlines():
-        line = raw.replace("\t", "    ")
-        stripped = line.lstrip()
-        if not stripped:
+
+def matching(tokens: list[Token], index: int, opening: str, closing: str) -> int:
+    depth = 0
+    for j in range(index, len(tokens)):
+        if tokens[j].value == opening:
+            depth += 1
+        elif tokens[j].value == closing:
+            depth -= 1
+            if depth == 0:
+                return j
+    return -1
+
+
+def _statement_end(tokens: list[Token], start: int) -> int:
+    """Return the first token after a conservative local declaration statement."""
+    if start >= len(tokens):
+        return start
+    paren = bracket = brace = block = 0
+    continuation = {"=", ",", ".", ":", "+", "-", "*", "/", "//", "%", "^", "..", "and", "or", "not", "return", "then", "do", "(", "{", "["}
+    statement_words = {"local", "function", "if", "for", "while", "repeat", "return", "break", "continue", "do"}
+    last_line = tokens[start].line
+    j = start
+    while j < len(tokens):
+        v = tokens[j].value
+        if v == "(" : paren += 1
+        elif v == ")": paren = max(0, paren - 1)
+        elif v == "[": bracket += 1
+        elif v == "]": bracket = max(0, bracket - 1)
+        elif v == "{": brace += 1
+        elif v == "}": brace = max(0, brace - 1)
+        elif v in ("function", "if", "repeat"):
+            block += 1
+        elif v == "do":
+            if j == 0 or tokens[j - 1].value not in ("for", "while"):
+                block += 1
+        elif v in ("end", "until"):
+            block = max(0, block - 1)
+        if j > start and paren == bracket == brace == block == 0:
+            if tokens[j - 1].value == ";":
+                return j
+            if tokens[j].line > last_line:
+                if tokens[j - 1].value not in continuation and v not in {".", ":", ",", ")", "]", "}", "and", "or"}:
+                    return j
+            if v in statement_words and tokens[j].line == last_line:
+                if tokens[j - 1].value not in continuation:
+                    return j
+        last_line = max(last_line, tokens[j].line)
+        j += 1
+    return len(tokens)
+
+
+def _parse_local_names(tokens: list[Token], i: int) -> tuple[list[int], int, bool]:
+    """Return declared name-token indices, first token after lhs, and function-local flag."""
+    if i + 2 < len(tokens) and tokens[i + 1].value == "function" and tokens[i + 2].kind == "ident":
+        return [i + 2], i + 3, True
+    names: list[int] = []
+    j = i + 1
+    while j < len(tokens):
+        if tokens[j].kind != "ident":
+            break
+        names.append(j)
+        j += 1
+        if j < len(tokens) and tokens[j].value == ":":
+            j += 1
+            while j < len(tokens) and tokens[j].value not in (",", "=") and tokens[j].line == tokens[j - 1].line:
+                j += 1
+        if j < len(tokens) and tokens[j].value == ",":
+            j += 1
+            continue
+        break
+    return names, j, False
+
+
+def _create_scope(parent: Scope, start: int, label: str) -> Scope:
+    return Scope(parent=parent, start=start, label=label)
+
+
+def find_function_end(tokens: list[Token], function_index: int, parameter_close: int | None = None) -> int | None:
+    """Find a function's matching end, tolerating nested Luau blocks."""
+    if parameter_close is None:
+        p = function_index + 1
+        while p < len(tokens) and tokens[p].value != "(":
+            if tokens[p].value in ("end", "then", "do", ";"):
+                return None
+            p += 1
+        if p >= len(tokens):
+            return None
+        parameter_close = matching(tokens, p, "(", ")")
+    if parameter_close is None or parameter_close < 0:
+        return None
+    blocks = ["function"]
+    j = parameter_close + 1
+    while j < len(tokens):
+        value = tokens[j].value
+        if value == "function":
+            blocks.append("function")
+        elif value == "if":
+            blocks.append("if")
+        elif value in ("for", "while"):
+            blocks.append("loop_wait")
+        elif value == "do":
+            if blocks and blocks[-1] == "loop_wait":
+                blocks[-1] = "loop"
+            else:
+                blocks.append("do")
+        elif value == "repeat":
+            blocks.append("repeat")
+        elif value == "until":
+            if blocks and blocks[-1] == "repeat":
+                blocks.pop()
+        elif value == "end":
+            if blocks:
+                blocks.pop()
+            if not blocks:
+                return j
+        j += 1
+    return None
+
+
+def attach_function_bodies(source: str, tokens: list[Token], bindings: list[Binding]) -> None:
+    """Attach actual function bodies to local function bindings for semantic naming."""
+    for binding in bindings:
+        if binding.role != "local":
+            continue
+        candidates: list[int] = []
+        i = binding.token_index
+        if i > 0 and tokens[i - 1].value == "function":
+            candidates.append(i - 1)
+        j = i + 1
+        while j < len(tokens) and tokens[j].line == tokens[i].line and tokens[j].value not in (";", "local", "return"):
+            if tokens[j].value == "=" and j + 1 < len(tokens) and tokens[j + 1].value == "function":
+                candidates.append(j + 1)
+                break
+            j += 1
+        for ref in binding.refs:
+            if ref + 2 < len(tokens) and tokens[ref + 1].value == "=" and tokens[ref + 2].value == "function":
+                candidates.append(ref + 2)
+                break
+        for fn_index in candidates:
+            p = fn_index + 1
+            while p < len(tokens) and tokens[p].value != "(":
+                p += 1
+            if p >= len(tokens):
+                continue
+            close = matching(tokens, p, "(", ")")
+            if close < 0:
+                continue
+            end = find_function_end(tokens, fn_index, close)
+            if end is not None:
+                binding.function_body = " ".join(t.value for t in tokens[close + 1:end])
+                binding.function_context = _function_context(tokens, fn_index)
+                break
+
+
+def build_bindings(source: str, all_tokens: list[Token]) -> tuple[list[Token], list[Binding], dict[int, Binding], dict[int, Scope], list[str]]:
+    """Build approximate lexical scopes and resolve local identifier references."""
+    tokens = significant(all_tokens)
+    root = Scope(None, 0, len(source) + 1, label="root")
+    current = root
+    stack: list[Block] = []
+    token_scopes: dict[int, Scope] = {}
+    decl_tokens: dict[int, Binding] = {}
+    bindings: list[Binding] = []
+    diagnostics: list[str] = []
+    i = 0
+    while i < len(tokens):
+        t = tokens[i]
+        v = t.value
+        if v == "end":
+            if stack:
+                block = stack.pop()
+                if block.scope is not None:
+                    block.scope.end = t.start
+                current = block.parent_scope
+            else:
+                diagnostics.append(f"unmatched 'end' at line {t.line}")
+            token_scopes[i] = current
+            i += 1
+            continue
+        if v in ("else", "elseif"):
+            if stack and stack[-1].kind == "if":
+                block = stack[-1]
+                if block.scope is not None:
+                    block.scope.end = t.start
+                current = block.parent_scope
+                block.scope = None
+                if v == "else":
+                    new_scope = _create_scope(current, t.end, "else")
+                    block.scope = new_scope
+                    current = new_scope
+            token_scopes[i] = current
+            i += 1
+            continue
+        if v == "until":
+            token_scopes[i] = current
+            if stack and stack[-1].kind == "repeat":
+                block = stack.pop()
+                if block.scope is not None:
+                    end_index = _statement_end(tokens, i + 1)
+                    block.scope.end = tokens[end_index - 1].end if end_index > i + 1 else t.end
+                current = block.parent_scope
+            else:
+                diagnostics.append(f"unmatched 'until' at line {t.line}")
+            i += 1
+            continue
+
+        token_scopes[i] = current
+        if v == "local":
+            name_indices, lhs_end, local_function = _parse_local_names(tokens, i)
+            if name_indices:
+                if local_function:
+                    active = tokens[name_indices[0]].start
+                elif lhs_end < len(tokens) and tokens[lhs_end].value == "=":
+                    next_index = _statement_end(tokens, lhs_end + 1)
+                    active = tokens[next_index].start if next_index < len(tokens) else len(source) + 1
+                else:
+                    active = tokens[lhs_end - 1].end if lhs_end > i + 1 else t.end
+                for ni in name_indices:
+                    b = Binding(tokens[ni].value, ni, current, active, role="local")
+                    current.bindings.append(b)
+                    bindings.append(b)
+                    decl_tokens[ni] = b
+        elif v == "function":
+            p = i + 1
+            while p < len(tokens) and tokens[p].value != "(":
+                if tokens[p].value in ("end", "then", "do", ";"):
+                    break
+                p += 1
+            if p < len(tokens) and tokens[p].value == "(":
+                close = matching(tokens, p, "(", ")")
+                if close >= 0:
+                    fn_scope = _create_scope(current, tokens[close].end, "function")
+                    fn_scope.function_token = i
+                    fn_scope.function_context = _function_context(tokens, i)
+                    fn_end = find_function_end(tokens, i, close)
+                    fn_scope.function_end = fn_end
+                    stack.append(Block("function", current, fn_scope))
+                    k = p + 1
+                    while k < close:
+                        if tokens[k].kind == "ident" and (k == p + 1 or tokens[k - 1].value == ","):
+                            b = Binding(tokens[k].value, k, fn_scope, tokens[close].end, role="parameter")
+                            fn_scope.bindings.append(b)
+                            bindings.append(b)
+                            decl_tokens[k] = b
+                        k += 1
+                    current = fn_scope
+                    i = close + 1
+                    continue
+        elif v == "if":
+            stack.append(Block("if", current))
+        elif v in ("for", "while"):
+            names: list[tuple[str, int]] = []
+            if v == "for":
+                j = i + 1
+                while j < len(tokens) and tokens[j].value not in ("=", "in", "do"):
+                    if tokens[j].kind == "ident" and (j == i + 1 or tokens[j - 1].value == ","):
+                        names.append((tokens[j].value, j))
+                    j += 1
+            stack.append(Block("loop_wait", current, header_start=i, loop_names=names))
+        elif v == "do":
+            if stack and stack[-1].kind == "loop_wait":
+                block = stack[-1]
+                block.kind = "loop"
+                loop_scope = _create_scope(current, t.end, "loop")
+                block.scope = loop_scope
+                for name, ni in block.loop_names:
+                    b = Binding(name, ni, loop_scope, t.end, role="loop")
+                    loop_scope.bindings.append(b)
+                    bindings.append(b)
+                    decl_tokens[ni] = b
+                current = loop_scope
+            else:
+                scope = _create_scope(current, t.end, "do")
+                stack.append(Block("do", current, scope))
+                current = scope
+        elif v == "then":
+            if stack and stack[-1].kind == "if" and stack[-1].scope is None:
+                scope = _create_scope(current, t.end, "if-branch")
+                stack[-1].scope = scope
+                current = scope
+        elif v == "repeat":
+            scope = _create_scope(current, t.end, "repeat")
+            stack.append(Block("repeat", current, scope))
+            current = scope
+        i += 1
+
+    for block in stack:
+        if block.scope is not None and block.scope.end > len(source):
+            diagnostics.append(f"unclosed '{block.kind}' block beginning near character {block.scope.start}")
+
+    for i, tok in enumerate(tokens):
+        if tok.kind != "ident" or i in decl_tokens:
+            continue
+        if i > 0 and tokens[i - 1].value in (".", ":"):
+            continue
+        if i + 1 < len(tokens) and tokens[i + 1].value == "=" and i > 0 and tokens[i - 1].value in ("{", ",", ";"):
+            continue
+        scope = token_scopes.get(i, root)
+        found = None
+        while scope is not None:
+            for b in reversed(scope.bindings):
+                if b.name == tok.value and tok.start >= b.active_from:
+                    found = b
+                    break
+            if found:
+                break
+            scope = scope.parent
+        if found:
+            found.refs.append(i)
+    attach_function_bodies(source, tokens, bindings)
+    return tokens, bindings, decl_tokens, token_scopes, diagnostics
+
+
+def infer_missing_services(
+    source: str, tokens: list[Token], bindings: list[Binding],
+    decl_tokens: dict[int, Binding], token_scopes: dict[int, Scope],
+) -> tuple[str, list[str]]:
+    """Add GetService aliases only for bare, otherwise-unbound Roblox service names."""
+    missing: list[str] = []
+    seen: set[str] = set()
+    for i, tok in enumerate(tokens):
+        if tok.kind != "ident" or tok.value not in SERVICE_NAMES or i in decl_tokens:
+            continue
+        if i > 0 and tokens[i - 1].value in (".", ":"):
+            continue
+        if i + 1 < len(tokens) and tokens[i + 1].value == "=" and i > 0 and tokens[i - 1].value in ("{", ",", ";"):
+            continue
+        scope = token_scopes.get(i)
+        resolved = False
+        while scope is not None:
+            if any(b.name == tok.value and tok.start >= b.active_from for b in reversed(scope.bindings)):
+                resolved = True
+                break
+            scope = scope.parent
+        if not resolved and tok.value not in seen:
+            seen.add(tok.value)
+            missing.append(tok.value)
+    if not missing:
+        return source, []
+    first_code = tokens[0].start if tokens else len(source)
+    prefix, body = source[:first_code], source[first_code:]
+    aliases = "\n".join(f'local {name} = game:GetService("{name}")' for name in missing)
+    spacer = "\n" if prefix and not prefix.endswith("\n") else ""
+    return prefix + spacer + aliases + "\n\n" + body, missing
+
+
+def _token_slice(source: str, tokens: list[Token], start_index: int, end_index: int) -> str:
+    if start_index >= end_index or start_index >= len(tokens):
+        return ""
+    end_index = min(end_index, len(tokens))
+    return source[tokens[start_index].start:tokens[end_index - 1].end]
+
+
+def _function_context(tokens: list[Token], index: int) -> str:
+    vals = [t.value for t in tokens[max(0, index - 12):index]]
+    for event in ("CharacterAdded", "PlayerAdded", "InputBegan", "InputChanged", "OnClientEvent", "Heartbeat", "RenderStepped", "Stepped", "ChildAdded", "DescendantAdded", "MouseButton1Click", "MouseButton1Down", "MouseEnter", "MouseLeave"):
+        if event in vals:
+            return event
+    return ""
+
+
+def infer_binding_names(source: str, tokens: list[Token], bindings: list[Binding], decl_tokens: dict[int, Binding]) -> None:
+    """Use initialization, member access, and callback context for conservative names."""
+    value_tokens = [t.value for t in tokens]
+    for b in bindings:
+        if not GARBAGE_IDENT.fullmatch(b.name):
+            continue
+        i = b.token_index
+        init = ""
+        if b.role == "local":
+            j = i + 1
+            while j < len(tokens) and tokens[j].line == tokens[i].line and tokens[j].value not in ("=", ";"):
+                j += 1
+            if j < len(tokens) and tokens[j].value == "=":
+                end = _statement_end(tokens, j + 1)
+                init = _token_slice(source, tokens, j + 1, end)
+        init_low = init.lower()
+        hint: str | None = None
+
+        service = re.search(r"GetService\s*\(\s*['\"]([A-Za-z0-9_]+)['\"]", init)
+        if service and service.group(1) in SERVICE_NAMES:
+            hint = service.group(1)
+        elif ".LocalPlayer" in init:
+            hint = "localPlayer"
+        elif "loadstring" in init_low and "fluent" in init_low:
+            if "savemanager" in init_low:
+                hint = "saveManager"
+            elif "interfacemanager" in init_low:
+                hint = "interfaceManager"
+            else:
+                hint = "fluentLibrary"
+        else:
+            inst = re.search(r"Instance\s*\.\s*new\s*\(\s*['\"]([A-Za-z0-9_]+)['\"]", init)
+            if inst:
+                hint = inst.group(1)[0].lower() + inst.group(1)[1:]
+
+        if hint is None:
+            child = re.search(r"(?:WaitForChild|FindFirstChild)\s*\(\s*['\"]([^'\"]+)['\"]", init)
+            if child:
+                raw = child.group(1)
+                hint = CHILD_NAMES.get(raw, raw[:1].lower() + raw[1:])
+        if hint is None:
+            event = re.search(r"\.([A-Za-z_][A-Za-z0-9_]*)\s*:\s*Connect\s*\(", init)
+            if event:
+                ev = event.group(1)
+                hint = ev[0].lower() + ev[1:] + "Conn"
+
+        ref_texts = [tokens[r].value for r in b.refs]
+        local_context = " ".join(value_tokens[max(0, i - 10):min(len(tokens), i + 40)])
+        assignment_rhs: list[str] = []
+        for ref in b.refs:
+            if ref + 1 < len(tokens) and tokens[ref + 1].value == "=":
+                rhs_end = _statement_end(tokens, ref + 2)
+                assignment_rhs.append(_token_slice(source, tokens, ref + 2, rhs_end))
+        assignment_context = " ".join(assignment_rhs)
+        if hint is None and b.role == "parameter":
+            ctx = b.scope.function_context or _function_context(tokens, i)
+            if b.scope.function_token is not None and b.scope.function_end is not None:
+                function_tokens = tokens[b.scope.function_token:b.scope.function_end + 1]
+                around = " ".join(t.value for t in function_tokens)
+            else:
+                around = " ".join(" ".join(value_tokens[max(0, r - 3):min(len(tokens), r + 12)]) for r in b.refs)
+            if ctx == "CharacterAdded": hint = "character"
+            elif ctx == "PlayerAdded": hint = "player"
+            elif ctx in ("InputBegan", "InputChanged"): hint = "input"
+            elif ctx == "OnClientEvent": hint = "action" if not ref_texts else "payload"
+            elif ctx in ("Heartbeat", "RenderStepped", "Stepped"): hint = "deltaTime"
+            elif ctx in ("ChildAdded", "DescendantAdded"): hint = "child"
+            elif "KeyCode" in around or "UserInputType" in around: hint = "input"
+            elif "string . sub" in around or (". Name" in around and "sub" in around): hint = "namePrefix"
+            elif "Health" in around or "WalkSpeed" in around or "JumpPower" in around: hint = "humanoid"
+            elif "HumanoidRootPart" in around or "FindFirstChild" in around: hint = "character"
+            elif "Character" in around and "UserId" in around: hint = "player"
+            elif b.name.lower() == "arg": hint = "argument"
+            else: hint = "value"
+        if hint is None and b.role == "local":
+            if "task.spawn" in init or "task.defer" in init or "task.delay" in init:
+                hint = "workerTask"
+            elif init.strip() == "{}":
+                hint = "state"
+            elif init.startswith(('"', "'")):
+                hint = "textValue"
+            elif re.search(r"\btrue\b|\bfalse\b", init):
+                hint = "isEnabled"
+            elif any(tokens[r - 2].value == "WalkSpeed" for r in b.refs if r >= 2):
+                hint = "walkSpeedValue"
+            elif any(tokens[r - 2].value == "JumpPower" for r in b.refs if r >= 2):
+                hint = "jumpPowerValue"
+            elif "Stats" in local_context and "SelectedStat" in local_context:
+                hint = "statNameMap"
+            elif "Options" in local_context and "Value" in local_context:
+                hint = "optionValue"
+            elif "FireServer" in local_context:
+                hint = "remoteArgument"
+            elif "return" in local_context and "Health" in local_context:
+                hint = "isAlive"
+            else:
+                hint = "value"
+
+        all_expr = init + " " + assignment_context
+        all_low = all_expr.lower()
+        if b.name.lower().startswith("connection"):
+            event = re.search(r"\.([A-Za-z_][A-Za-z0-9_]*)\s*:\s*Connect\s*\(", all_expr)
+            hint = event.group(1)[0].lower() + event.group(1)[1:] + "Conn" if event else "eventConnection"
+        if b.name.lower().startswith("thread"):
+            if "autostoryline" in all_low: hint = "storylineTask"
+            elif "automission" in all_low: hint = "missionTask"
+            elif "automeditation" in all_low: hint = "meditationTask"
+            elif "autofarmplayer" in all_low: hint = "playerFarmTask"
+            elif "autoraid" in all_low: hint = "raidTask"
+            elif "autoskill" in all_low: hint = "skillTask"
+            elif "autoworkout" in all_low: hint = "workoutTask"
+            elif "task.spawn" in all_low: hint = "backgroundTask"
+        if b.name.lower().startswith("paragraph") and "addparagraph" in all_low:
+            title = re.search(r"Title\s*=\s*['\"]([^'\"]+)", all_expr)
+            if title:
+                title_name = re.sub(r"[^A-Za-z0-9]+", " ", title.group(1)).strip().title().replace(" ", "")
+                hint = title_name[:1].lower() + title_name[1:] + "Paragraph"
+            else:
+                hint = "statusParagraph"
+        if b.name.lower().startswith("tbl"):
+            if "AddTab" in all_expr: hint = "uiTabs"
+            elif "npcName" in all_expr and "bossName" in all_expr: hint = "raidDefinitions"
+            elif "StrengthStat" in all_expr or "DestructivePowerStat" in all_expr: hint = "statNameMap"
+            elif "Storyline" in all_expr and "function" not in all_expr: hint = "questNames"
+            elif "Dioraid" in all_expr or "Jotaro" in all_expr: hint = "raidDefinitions"
+            elif "!code" in all_expr: hint = "redeemCodes"
+            elif all_expr.strip() == "{}" or (".main" in assignment_context): hint = "taskHandles"
+            elif "function" in all_expr and "autostoryline" in all_expr: hint = "automationChecks"
+            elif "FireServer" in assignment_context and "trackquest" in all_low: hint = "questNameArguments"
+        if b.name.lower().startswith("flag"):
+            if "MouseButton1Click" in assignment_context or "MouseButton1Click" in local_context: hint = "toggleGuiEnabled"
+            elif "Joined PvP Mission Queue" in all_expr or "Mission Complete" in all_expr: hint = "isInMissionQueue"
+            elif "BodyVelocity" in all_expr or "BodyGyro" in all_expr or "bodyVelocity" in local_context: hint = "isFlightEnabled"
+            elif "RetryRaidMode" in all_expr: hint = "retryRaidEnabled"
+            elif "prestige" in all_low or "Prestige" in local_context: hint = "isPrestigeActive"
+        if b.name == "n" and "FlySpeed" in assignment_context + local_context: hint = "flightSpeed"
+        if b.name == "n2" or "StatAmountInput" in assignment_context + local_context: hint = "statUpgradeAmount"
+        if b.name.lower() == "cframe": hint = "savedCFrame"
+
+        if b.role == "local" and re.fullmatch(r"(?:fn\d+|f\d+|_l\d+|tween\d*)", b.name, re.I):
+            body_context = b.function_body or " ".join(value_tokens[i:min(len(tokens), i + 35)])
+            body_low = body_context.lower()
+            if "tweenservice" in body_low or ("color3" in body_low and "backgroundcolor3" in body_low):
+                hint = "updateButtonAppearance"
+            elif "characteradded" in body_low and "wait" in body_low and "humanoidrootpart" in body_low:
+                hint = "refreshCharacterReferences"
+            elif "findfirstchildofclass" in body_low and "humanoid" in body_low and "health" in body_low:
+                hint = "isCharacterAlive"
+            elif "getplayers" in body_low and "name" in body_low and "table" in body_low:
+                hint = "getPlayerNames"
+            elif "getdescendants" in body_low and "proximityprompt" in body_low and "fireproximityprompt" in body_low:
+                hint = "activateNpcPrompts"
+            elif "questbrick" in body_low and "cframe" in body_low and "effects" in body_low:
+                hint = "processQuestEffects"
+            elif "trackedquest" in body_low and "farmquest" in body_low:
+                hint = "isTrackedQuestComplete"
+            elif "trackquest" in body_low and "fireserver" in body_low:
+                hint = "setTrackedQuest"
+            elif "getchildren" in body_low and "humanoid" in body_low and "string" in body_low and "name" in body_low:
+                hint = "findLivingTarget"
+            elif "farmquestconfig" in body_low and "trackedquest" in body_low:
+                hint = "runQuestHandler"
+            elif "task.cancel" in body_low and "getgenv" in body_low:
+                hint = "stopAutomation"
+            elif "task.spawn" in body_low and "getgenv" in body_low:
+                hint = "startAutomation"
+            elif "getdescendants" in body_low and "proximityprompt" in body_low:
+                hint = "findNpcPrompts"
+            elif "invokeserver" in body_low:
+                hint = "invokeRemoteFunction"
+            elif "fireserver" in body_low:
+                hint = "sendRemoteEvent"
+            elif b.function_context:
+                hint = "on" + b.function_context[0].upper() + b.function_context[1:]
+            elif "callback" in body_low and "return" in body_low:
+                hint = "checkCallback"
+            else:
+                hint = "handleEvent"
+        if b.name.lower().startswith("thread") and hint in (None, "value", "workerTask"):
+            hint = "backgroundTask"
+        if b.name.lower().startswith("connection") and hint in (None, "value"):
+            hint = "eventConnection"
+        if b.name.lower().startswith("flag") and hint in (None, "value", "isEnabled"):
+            hint = "isFeatureEnabled"
+        if b.name.lower().startswith("n") and hint == "value":
+            hint = "numericValue"
+        if b.name.lower().startswith("lib") and hint in (None, "value"):
+            hint = "library"
+        b.hint = hint or "value"
+
+
+def rename_bindings(source: str, tokens: list[Token], bindings: list[Binding], decl_tokens: dict[int, Binding]) -> tuple[str, dict[str, int]]:
+    infer_binding_names(source, tokens, bindings, decl_tokens)
+    used = set(RESERVED) | {b.name for b in bindings if not GARBAGE_IDENT.fullmatch(b.name)}
+    renamed: dict[str, int] = {}
+    replacements: list[tuple[int, int, str]] = []
+    for b in bindings:
+        if not GARBAGE_IDENT.fullmatch(b.name):
+            continue
+        base = b.hint or "value"
+        candidate = base
+        suffix = 2
+        while candidate in used:
+            candidate = f"{base}{suffix}"
+            suffix += 1
+        b.new_name = candidate
+        used.add(candidate)
+        renamed[b.name] = renamed.get(b.name, 0) + 1
+        decl_tok = tokens[b.token_index]
+        replacements.append((decl_tok.start, decl_tok.end, candidate))
+        for ri in b.refs:
+            ref = tokens[ri]
+            replacements.append((ref.start, ref.end, candidate))
+    for start, end, new in sorted(replacements, reverse=True):
+        source = source[:start] + new + source[end:]
+    return source, renamed
+
+
+def strip_banners(source: str) -> str:
+    return "\n".join(line for line in source.splitlines() if not BANNER_RE.match(line))
+
+
+def strip_pure_junk(source: str) -> str:
+    return "\n".join(line for line in source.splitlines() if not PURE_STMT_RE.match(line) and not EMPTY_DO_RE.match(line))
+
+
+def split_semicolons(source: str) -> str:
+    """Move statements separated by semicolons onto individual lines, outside strings/comments."""
+    toks = lex(source)
+    insertions = []
+    for tok in toks:
+        if tok.value == ";":
+            insertions.append(tok.end)
+    for pos in reversed(insertions):
+        if pos < len(source) and source[pos] not in "\r\n":
+            source = source[:pos] + "\n" + source[pos:]
+    return source
+
+
+def split_control_blocks(source: str) -> str:
+    """Expand inline block statements without touching text inside strings/comments."""
+    tokens = lex(source)
+    insertions: set[int] = set()
+    for index, tok in enumerate(tokens):
+        if tok.kind != "keyword":
+            continue
+        value = tok.value
+        line_start = source.rfind("\n", 0, tok.start) + 1
+        has_code_before = bool(source[line_start:tok.start].strip())
+        if value in ("local", "if", "for", "while", "repeat", "return", "end", "else", "elseif", "until") and has_code_before:
+            if value != "local" or (index > 0 and tokens[index - 1].value not in ("local", "function")):
+                insertions.add(tok.start)
+        if value in ("then", "do", "else", "repeat"):
+            line_end = source.find("\n", tok.end)
+            if line_end < 0:
+                line_end = len(source)
+            if source[tok.end:line_end].strip():
+                insertions.add(tok.end)
+    for position in sorted(insertions, reverse=True):
+        if position > 0 and source[position - 1] != "\n":
+            source = source[:position] + "\n" + source[position:]
+    return source
+
+
+def normalize_spacing(source: str) -> str:
+    """Normalize commas and plain assignment spacing without rewriting literals."""
+    edits: list[tuple[int, str]] = []
+    for tok in lex(source):
+        if tok.value == ",":
+            if tok.end < len(source) and source[tok.end] not in " \t\r\n":
+                edits.append((tok.end, " "))
+        elif tok.value == "=":
+            if tok.start > 0 and source[tok.start - 1] not in " \t\r\n":
+                edits.append((tok.start, " "))
+            if tok.end < len(source) and source[tok.end] not in " \t\r\n":
+                edits.append((tok.end, " "))
+    for position, value in sorted(edits, reverse=True):
+        source = source[:position] + value + source[position:]
+    return source
+
+
+def _line_block_delta(line: str) -> tuple[int, int]:
+    """Return leading outdent and net block depth using lexical tokens only."""
+    toks = lex(line)
+    words = [t.value for t in toks if t.kind == "keyword"]
+    leading = 1 if words and words[0] in ("end", "until", "else", "elseif") else 0
+    opens = sum(1 for x in words if x in ("function", "then", "do", "repeat", "else"))
+    closes = sum(1 for x in words if x in ("end", "until", "elseif", "else"))
+    return leading, opens - closes
+
+
+def indent_source(source: str) -> str:
+    out: list[str] = []
+    depth = 0
+    table_depth = 0
+    for raw in source.splitlines():
+        text = raw.strip()
+        if not text:
             out.append("")
             continue
-        if dec_before.match(stripped):
-            depth = max(0, depth - 1)
-        out.append("    " * depth + stripped)
-        opens = len(re.findall(r"\b(function|then|do|repeat)\b", stripped, re.I))
-        closes = len(re.findall(r"\b(end|until)\b", stripped, re.I))
-        if re.match(r"else\b", stripped, re.I):
-            opens += 1
-        depth = max(0, depth + opens - closes)
+        leading, delta = _line_block_delta(text)
+        toks = lex(text)
+        symbols = [t.value for t in toks if t.kind == "punct"]
+        closes_table = 1 if symbols and symbols[0] == "}" else 0
+        out.append("    " * max(0, depth - leading + table_depth - closes_table) + text)
+        depth = max(0, depth + delta)
+        table_depth = max(0, table_depth + symbols.count("{") - symbols.count("}"))
     return "\n".join(out)
 
-def collect_idents(text: str) -> list[str]:
-    found, seen = [], set()
-    for m in GARBAGE_IDENT.finditer(text):
-        name = m.group(1)
-        if name in RESERVED or name in seen:
-            continue
-        seen.add(name)
-        found.append(name)
-    return found
 
-def semantic_hints(text: str) -> dict[str, str]:
-    hints: dict[str, str] = {}
-    for m in re.finditer(
-        r"\blocal\s+([A-Za-z_]\w*)\s*=\s*game\s*:\s*GetService\s*\(\s*[\"'](\w+)[\"']\s*\)", text
-    ):
-        var, svc = m.group(1), m.group(2)
-        if GARBAGE_IDENT.fullmatch(var) and svc in SERVICE_NAMES:
-            hints[var] = svc
-    for m in re.finditer(
-        r"\blocal\s+([A-Za-z_]\w*)\s*=\s*[A-Za-z_]\w*\s*\.\s*LocalPlayer\b", text
-    ):
-        if GARBAGE_IDENT.fullmatch(m.group(1)):
-            hints[m.group(1)] = "localPlayer"
-    special = {
-        "HumanoidRootPart": "rootPart", "PlayerGui": "playerGui", "Remotes": "remotes",
-        "Humanoid": "humanoid", "Hit": "hitRemote", "Sync": "syncRemote",
-        "CombatEvent": "combatEvent", "DataFunction": "dataFunction",
-    }
-    for m in re.finditer(
-        r"\blocal\s+([A-Za-z_]\w*)\s*=\s*[^;\n]+:(?:WaitForChild|FindFirstChild|FindFirstChildOfClass)\s*\(\s*[\"'](\w+)[\"']",
-        text,
-    ):
-        var, child = m.group(1), m.group(2)
-        if GARBAGE_IDENT.fullmatch(var):
-            hints[var] = special.get(child, child[0].lower() + child[1:])
-    for m in re.finditer(r"\b(?:local\s+)?function\s+([A-Za-z_]\w*)\s*\(", text):
-        var = m.group(1)
-        if not GARBAGE_IDENT.fullmatch(var):
-            continue
-        window = text[m.end() : m.end() + 500]
-        if "FireServer" in window or "InvokeServer" in window:
-            hints.setdefault(var, "fireRemote")
-        elif "WalkSpeed" in window or "JumpPower" in window:
-            hints.setdefault(var, "applyStats")
-        elif "FindFirstChildOfClass" in window and "Humanoid" in window:
-            hints.setdefault(var, "getHumanoidAndRoot")
-        elif "KeyCode" in window or "UserInputType" in window:
-            hints.setdefault(var, "onInputBegan")
-    for m in re.finditer(
-        r"\blocal\s+([A-Za-z_]\w*)\s*=\s*[^;\n]+\.(\w+)\s*:\s*Connect\s*\(", text
-    ):
-        var, ev = m.group(1), m.group(2)
-        if GARBAGE_IDENT.fullmatch(var):
-            hints[var] = ev[0].lower() + ev[1:] + "Conn"
-    return hints
+def collapse_blank_lines(source: str) -> str:
+    return re.sub(r"\n{3,}", "\n\n", source).strip() + "\n"
 
-def build_rename_map(idents: list[str], hints: dict[str, str] | None = None) -> dict[str, str]:
-    hints = hints or {}
-    mapping: dict[str, str] = {}
-    used = set(RESERVED)
-    for name in idents:
-        if name in hints:
-            base, cand, n = hints[name], hints[name], 2
-            while cand in used:
-                cand = f"{base}{n}"
-                n += 1
-            mapping[name] = cand
-            used.add(cand)
-    counters = {k: 0 for k in ("v","u","p","a","r","t","f","fn","tbl","arg","var","l","loc","other")}
-    prefix_word = {
-        "v":"value","u":"upval","p":"part","a":"arg","r":"reg","t":"temp","f":"fn",
-        "fn":"handler","tbl":"data","arg":"param","var":"state","l":"node","loc":"node","other":"name",
-    }
-    def family(name: str) -> str:
-        lower = name.lower()
-        for p in ("tbl","arg","var","fn","loc"):
-            if lower.startswith(p):
-                return p
-        if lower.startswith("_l") or lower.startswith("l_"):
-            return "l"
-        return name[0] if name[0] in counters else "other"
-    for name in idents:
-        if name in mapping:
-            continue
-        fam = family(name)
-        counters[fam] += 1
-        n = counters[fam]
-        word = prefix_word[fam]
-        new = f"{word}{n}" if n > 1 or fam in ("v","u","r","t","other","l","loc") else word
-        base, k = new, 1
-        while new in used:
-            k += 1
-            new = f"{base}_{k}"
-        mapping[name] = new
-        used.add(new)
-    return mapping
 
-def apply_renames(text: str, mapping: dict[str, str]) -> str:
-    if not mapping:
-        return text
-    keys = sorted(mapping.keys(), key=len, reverse=True)
-    pattern = re.compile(r"\b(" + "|".join(re.escape(k) for k in keys) + r")\b")
-    return pattern.sub(lambda m: mapping.get(m.group(1), m.group(1)), text)
-
-def space_operators(text: str) -> str:
-    text = re.sub(r"(local\s+[A-Za-z_]\w*)\s*=\s*", r"\1 = ", text)
-    text = re.sub(r",\s*", ", ", text)
-    return text
-
-def is_trace_only(text: str) -> bool:
-    body = text.strip()
+def is_trace_only(source: str) -> bool:
+    body = source.strip()
     if not body:
         return True
     if re.search(r"BEHAVIOUR TRACE ONLY|statements recorded", body, re.I):
@@ -207,42 +883,69 @@ def is_trace_only(text: str) -> bool:
             return True
     return False
 
-def beautify(text: str, aggressive: bool = True, semantic: bool = True) -> str:
-    if is_trace_only(text):
-        return (
-            "-- NOT SOURCE: behaviour / anti-tamper trace only\n"
-            "-- No recoverable game logic in this input.\n"
-        )
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
-    text = strip_banners(text)
-    text = unpack_minified(text)
-    text = strip_pure_junk(text)
-    text = space_operators(text)
+
+def beautify(source: str, aggressive: bool = True, semantic: bool = True, return_report: bool = False):
+    if is_trace_only(source):
+        out = "-- NOT SOURCE: behaviour / anti-tamper trace only\n-- No recoverable game logic in this input.\n"
+        return (out, {"renamed_bindings": 0, "diagnostics": []}) if return_report else out
+    source = source.replace("\r\n", "\n").replace("\r", "\n")
+    source = strip_banners(source)
+    source = split_semicolons(source)
+    source = split_control_blocks(source)
+    source = normalize_spacing(source)
+    source = strip_pure_junk(source)
+    rename_stats: dict[str, int] = {}
+    diagnostics: list[str] = []
+    inferred_services: list[str] = []
     if aggressive or semantic:
-        idents = collect_idents(text)
-        hints = semantic_hints(text) if semantic else {}
-        mapping = build_rename_map(idents, hints)
-        text = apply_renames(text, mapping)
-    text = light_indent(text)
-    text = collapse_blank_lines(text)
-    if not text.startswith("-- Beautified"):
-        text = "-- Beautified from deobfuscator output\n\n" + text
-    return text
+        all_tokens = lex(source)
+        tokens, bindings, decl_tokens, token_scopes, diagnostics = build_bindings(source, all_tokens)
+        source, inferred_services = infer_missing_services(source, tokens, bindings, decl_tokens, token_scopes)
+        if inferred_services:
+            tokens, bindings, decl_tokens, _, refreshed_diagnostics = build_bindings(source, lex(source))
+            diagnostics = refreshed_diagnostics
+        if semantic:
+            source, rename_stats = rename_bindings(source, tokens, bindings, decl_tokens)
+        else:
+            for b in bindings:
+                if GARBAGE_IDENT.fullmatch(b.name):
+                    b.hint = "value"
+            source, rename_stats = rename_bindings(source, tokens, bindings, decl_tokens)
+    source = indent_source(source)
+    source = collapse_blank_lines(source)
+    if not source.startswith("-- Beautified"):
+        source = "-- Beautified from deobfuscator output\n\n" + source
+    if diagnostics:
+        notes = "\n".join("-- Beautifier note: " + x for x in diagnostics)
+        source = source.replace("-- Beautified from deobfuscator output\n", "-- Beautified from deobfuscator output\n" + notes + "\n")
+    report = {
+        "renamed_bindings": sum(rename_stats.values()),
+        "renamed_names": len(rename_stats),
+        "inferred_services": inferred_services,
+        "diagnostics": diagnostics,
+        "remaining_garbage": len(GARBAGE_IDENT.findall(" ".join(t.value for t in lex(source)))),
+    }
+    return (source, report) if return_report else source
+
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Beautify deobfuscated Roblox Luau")
-    ap.add_argument("input", type=Path)
-    ap.add_argument("-o", "--output", type=Path)
-    ap.add_argument("--no-semantic", action="store_true")
-    args = ap.parse_args()
+    parser = argparse.ArgumentParser(description="Scope-aware Roblox Luau beautifier")
+    parser.add_argument("input", type=Path)
+    parser.add_argument("-o", "--output", type=Path)
+    parser.add_argument("--no-semantic", action="store_true")
+    parser.add_argument("--report", action="store_true", help="print rename and structural diagnostics")
+    args = parser.parse_args()
     raw = args.input.read_text(encoding="utf-8", errors="replace")
-    out = beautify(raw, aggressive=True, semantic=not args.no_semantic)
+    out, report = beautify(raw, aggressive=True, semantic=not args.no_semantic, return_report=True)
     if args.output:
         args.output.write_text(out, encoding="utf-8")
         print(f"wrote {args.output} ({len(out)} bytes)", file=sys.stderr)
     else:
         sys.stdout.write(out)
+    if args.report:
+        print(report, file=sys.stderr)
     return 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main())
