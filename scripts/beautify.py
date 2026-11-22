@@ -624,15 +624,17 @@ def _function_context(tokens: list[Token], index: int) -> str:
 
 
 def infer_function_name_from_ast(binding: Binding) -> tuple[str, float, list[str]] | None:
-    """Rank function-name candidates from syntax-tree call, member, string, and control facts."""
+    """Rank function-name candidates from structured AST calls, members, strings, and control flow."""
     facts = binding.ast_features
     if not facts:
         return None
-    calls = " ".join(facts.get("calls", [])).lower()
-    members = " ".join(facts.get("members", [])).lower()
-    strings = " ".join(facts.get("strings", [])).lower()
-    controls = " ".join(facts.get("control", [])).lower()
-    compact = re.sub(r"\s+", "", " ".join((calls, members, strings, controls, binding.function_body))).lower()
+
+    calls = [value.lower() for value in facts.get("calls", [])]
+    members = {value.lower() for value in facts.get("members", [])}
+    strings = {value.lower().strip("'\"") for value in facts.get("strings", [])}
+    body = re.sub(r"\s+", "", binding.function_body).lower()
+    combined_calls = " ".join(calls)
+    combined = " ".join((combined_calls, " ".join(members), " ".join(strings), body))
 
     candidates: dict[str, tuple[float, list[str]]] = {}
 
@@ -641,40 +643,45 @@ def infer_function_name_from_ast(binding: Binding) -> tuple[str, float, list[str
         current_evidence.append(evidence)
         candidates[name] = (current_score + weight, current_evidence)
 
-    if "getchildren" in compact and "string.sub" in compact and "live" in strings and ".name" in compact:
-        score("findLiveEntityByPrefix", 3.5, "iterates live entities and compares a name prefix")
-    if "getplayers" in compact and "table.insert" in compact and ".name" in compact:
+    has_call = lambda fragment: any(fragment in call.replace(" ", "") for call in calls)
+    has_member = lambda *names: any(name.lower() in members for name in names)
+    has_string = lambda *values: any(value.lower() in strings for value in values)
+
+    if has_call("getchildren") and has_call("string.sub") and has_member("Name") and has_string("Live"):
+        score("findLiveEntityByPrefix", 4.0, "iterates live entities and compares a name prefix")
+    if has_call("getplayers") and has_call("table.insert") and has_member("Name"):
         score("getPlayerNames", 3.5, "collects player names")
-    if "bodyvelocity" in compact and "bodygyro" in compact:
-        score("stopFlight" if any(x in compact for x in ("destroy(", "task.cancel", "disconnect(")) else "startFlight",
-              4.0, "creates or removes flight physics objects")
-    if "teleportservice" in compact and "teleport(" in compact:
+    if "bodyvelocity" in combined and "bodygyro" in combined:
+        removing = any(term in combined for term in ("destroy(", "task.cancel", "disconnect("))
+        score("stopFlight" if removing else "startFlight", 4.0, "creates or removes flight physics objects")
+    if "teleportservice" in combined and "teleport(" in combined:
         score("teleportToPlace", 3.5, "calls TeleportService")
-    if "findfirstchildofclass" in compact and "humanoid" in compact and ".health" in compact:
-        score("isCharacterAlive", 4.0, "checks a Humanoid health value")
-    if "tweenservice" in compact and "backgroundcolor3" in compact:
+    if has_call("findfirstchildofclass") and has_string("Humanoid") and has_member("Health"):
+        name = "getLivingHumanoid" if "returnhumanoid" in body else "isCharacterAlive"
+        score(name, 4.0, "looks up a Humanoid and checks its health")
+    if "tweenservice" in combined and has_member("BackgroundColor3"):
         score("updateButtonAppearance", 3.5, "tweens a button appearance property")
-    if "getdescendants" in compact and "proximityprompt" in compact and "fireproximityprompt" in compact:
+    if has_call("getdescendants") and "proximityprompt" in combined and "fireproximityprompt" in combined:
         score("activateNpcPrompts", 4.0, "finds and activates prompt objects")
-    if "trackquest" in compact and "fireserver" in compact:
+    if "trackquest" in combined and "fireserver" in combined:
         score("setTrackedQuest", 4.0, "sends the tracked quest to a remote")
-    if "trackedquest" in compact and "farmquest" in compact:
+    if "trackedquest" in combined and "farmquest" in combined:
         score("isTrackedQuestComplete", 3.5, "checks tracked quest progress")
-    if "farmquestconfig" in compact and "autostoryline" in compact:
+    if "farmquestconfig" in combined and "autostoryline" in combined:
         score("runTrackedQuestConfig", 4.0, "uses quest configuration and storyline state")
-    if "autoraid" in compact and "task.spawn" in compact:
+    if "autoraid" in combined and "task.spawn" in combined:
         score("startAutoRaid", 3.5, "starts a raid automation task")
-    if "autoraid" in compact and "task.cancel" in compact:
+    if "autoraid" in combined and "task.cancel" in combined:
         score("stopAutoRaid", 3.5, "cancels a raid automation task")
-    if "autostoryline" in compact and "task.spawn" in compact:
+    if "autostoryline" in combined and "task.spawn" in combined:
         score("startAutoStoryline", 3.5, "starts a storyline task")
-    if "autoskill" in compact and "task.spawn" in compact:
+    if "autoskill" in combined and "task.spawn" in combined:
         score("runAutoSkills", 3.5, "starts an automatic skill task")
-    if "teleportservice" in compact and "teleport(" in compact and "hub" in strings:
+    if "teleportservice" in combined and "teleport(" in combined and has_string("hub"):
         score("teleportToHub", 4.0, "teleports to a hub destination")
-    if "currentcamera" in compact and ("targetplayer" in compact or "spectate" in strings):
+    if has_member("CurrentCamera", "CameraSubject") and ("targetplayer" in combined or has_string("spectate")):
         score("spectateTargetPlayer", 3.5, "changes camera subject to a selected target")
-    if "meditation" in compact and ("yogamat" in compact or "yoga mat" in strings):
+    if "meditation" in combined and ("yogamat" in combined or has_string("Yoga Mat")):
         score("runMeditationRoutine", 3.5, "uses meditation state and a yoga mat")
 
     if not candidates:
@@ -682,10 +689,10 @@ def infer_function_name_from_ast(binding: Binding) -> tuple[str, float, list[str
     ranked = sorted(candidates.items(), key=lambda item: (-item[1][0], item[0]))
     best_name, (best_score, evidence) = ranked[0]
     runner_up = ranked[1][1][0] if len(ranked) > 1 else 0.0
-    # Avoid confident names when two interpretations have comparable evidence.
     if best_score < 3.0 or (len(ranked) > 1 and best_score - runner_up < 0.75):
         return None
     return best_name, best_score, evidence
+
 
 def infer_semantic_function_name(binding: Binding) -> str | None:
     """Name a helper from AST evidence first, then conservative source heuristics."""
