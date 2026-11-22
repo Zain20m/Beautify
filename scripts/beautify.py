@@ -608,8 +608,79 @@ def _function_context(tokens: list[Token], index: int) -> str:
 
 
 
+
+def infer_function_name_from_ast(binding: Binding) -> tuple[str, float, list[str]] | None:
+    """Rank function-name candidates from syntax-tree call, member, string, and control facts."""
+    facts = binding.ast_features
+    if not facts:
+        return None
+    calls = " ".join(facts.get("calls", [])).lower()
+    members = " ".join(facts.get("members", [])).lower()
+    strings = " ".join(facts.get("strings", [])).lower()
+    controls = " ".join(facts.get("control", [])).lower()
+    compact = re.sub(r"\s+", "", " ".join((calls, members, strings, controls, binding.function_body))).lower()
+
+    candidates: dict[str, tuple[float, list[str]]] = {}
+
+    def score(name: str, weight: float, evidence: str):
+        current_score, current_evidence = candidates.get(name, (0.0, []))
+        current_evidence.append(evidence)
+        candidates[name] = (current_score + weight, current_evidence)
+
+    if "getchildren" in compact and "string.sub" in compact and "live" in strings and ".name" in compact:
+        score("findLiveEntityByPrefix", 3.5, "iterates live entities and compares a name prefix")
+    if "getplayers" in compact and "table.insert" in compact and ".name" in compact:
+        score("getPlayerNames", 3.5, "collects player names")
+    if "bodyvelocity" in compact and "bodygyro" in compact:
+        score("stopFlight" if any(x in compact for x in ("destroy(", "task.cancel", "disconnect(")) else "startFlight",
+              4.0, "creates or removes flight physics objects")
+    if "teleportservice" in compact and "teleport(" in compact:
+        score("teleportToPlace", 3.5, "calls TeleportService")
+    if "findfirstchildofclass" in compact and "humanoid" in compact and ".health" in compact:
+        score("isCharacterAlive", 4.0, "checks a Humanoid health value")
+    if "tweenservice" in compact and "backgroundcolor3" in compact:
+        score("updateButtonAppearance", 3.5, "tweens a button appearance property")
+    if "getdescendants" in compact and "proximityprompt" in compact and "fireproximityprompt" in compact:
+        score("activateNpcPrompts", 4.0, "finds and activates prompt objects")
+    if "trackquest" in compact and "fireserver" in compact:
+        score("setTrackedQuest", 4.0, "sends the tracked quest to a remote")
+    if "trackedquest" in compact and "farmquest" in compact:
+        score("isTrackedQuestComplete", 3.5, "checks tracked quest progress")
+    if "farmquestconfig" in compact and "autostoryline" in compact:
+        score("runTrackedQuestConfig", 4.0, "uses quest configuration and storyline state")
+    if "autoraid" in compact and "task.spawn" in compact:
+        score("startAutoRaid", 3.5, "starts a raid automation task")
+    if "autoraid" in compact and "task.cancel" in compact:
+        score("stopAutoRaid", 3.5, "cancels a raid automation task")
+    if "autostoryline" in compact and "task.spawn" in compact:
+        score("startAutoStoryline", 3.5, "starts a storyline task")
+    if "autoskill" in compact and "task.spawn" in compact:
+        score("runAutoSkills", 3.5, "starts an automatic skill task")
+    if "teleportservice" in compact and "teleport(" in compact and "hub" in strings:
+        score("teleportToHub", 4.0, "teleports to a hub destination")
+    if "currentcamera" in compact and ("targetplayer" in compact or "spectate" in strings):
+        score("spectateTargetPlayer", 3.5, "changes camera subject to a selected target")
+    if "meditation" in compact and ("yogamat" in compact or "yoga mat" in strings):
+        score("runMeditationRoutine", 3.5, "uses meditation state and a yoga mat")
+
+    if not candidates:
+        return None
+    ranked = sorted(candidates.items(), key=lambda item: (-item[1][0], item[0]))
+    best_name, (best_score, evidence) = ranked[0]
+    runner_up = ranked[1][1][0] if len(ranked) > 1 else 0.0
+    # Avoid confident names when two interpretations have comparable evidence.
+    if best_score < 3.0 or (len(ranked) > 1 and best_score - runner_up < 0.75):
+        return None
+    return best_name, best_score, evidence
+
 def infer_semantic_function_name(binding: Binding) -> str | None:
-    """Name a helper from its body, not its decompiler-generated label."""
+    """Name a helper from AST evidence first, then conservative source heuristics."""
+    ast_candidate = infer_function_name_from_ast(binding)
+    if ast_candidate:
+        name, confidence, evidence = ast_candidate
+        binding.inference_confidence = confidence
+        binding.name_evidence = evidence
+        return name
     body = re.sub(r"\s+", " ", binding.function_body).lower()
     compact = re.sub(r"\s+", "", body)
     if not body:
