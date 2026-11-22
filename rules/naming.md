@@ -1,15 +1,27 @@
 # Naming rules
 
-## Targets
+## Rename targets
 
-Rename only scoped local bindings, parameters, and loop variables that have weak generated names.
+Rename scoped locals, local functions, parameters, and loop variables only when their names are generated or weak.
 
-Common generated patterns:
-
+Common obfuscator names:
 - `v1`, `v12`, `u3`, `p4`, `a2`, `r8`, `t_1`
-- `tbl`, `tbl4`, `Arg2`, `arg`, `var_3`
-- `_l173`, `L_1`, `PROTO_5`, `STACK`, `REGISTER`
-- `fn2`, `f4`, `thread2`, `connection3`
+- `tbl4`, `Arg2`, `arg`, `var_3`, `_l173`, `L_1`
+- `PROTO_5`, `STACK`, `REGISTER`, `fn2`, `f4`
+
+Weak names from an earlier cleanup pass:
+- `handleEvent`, `handleEvent2`, `sendRemoteEvent`
+- `value`, `value12`, `numericValue2`, `argument`
+- `eventConnection`, `isFeatureEnabled`
+
+## Naming process
+
+1. Build lexical bindings and resolve every reference to its declaration.
+2. Infer functions from complete bodies and nearby API usage; use action + target names.
+3. Infer callback parameters from event names and properties used in the callback.
+4. Infer locals from constructors, initializer expressions, assignments, property access, and surrounding function context.
+5. Reuse Roblox service names and instance names when the source directly supports them.
+6. Keep generated replacement names unique and outside the generated-name pattern.
 
 ## Preferred Roblox names
 
@@ -22,21 +34,12 @@ Common generated patterns:
 | Networking | `remoteEvent`, `remoteFunction`, `hitRemote`, `syncRemote` |
 | Connections | `heartbeatConn`, `renderSteppedConn`, `characterAddedConn`, `inputBeganConn` |
 | Tasks | `missionTask`, `raidTask`, `backgroundTask` |
-| Config / data | `config`, `settings`, `defaults`, `options`, `state`, `cache` |
+| Config / data | `config`, `settings`, `defaults`, `options`, `state`, `cache`, `raidDefinition` |
 
-## Style
+## Style and safety
 
-- Locals / functions: camelCase.
-- Module exports or class-like tables: PascalCase only when the source already uses that convention.
-- Constants: UPPER_SNAKE only for genuine constants.
-- One binding keeps one name throughout its lexical scope.
-- Shadowed bindings are separate variables and must be renamed independently.
-
-## Safety and consistency
-
-- Do not rename identifiers inside strings or comments.
-- Do not rename member names after `.` or `:`.
-- Do not rename literal table keys.
-- Do not rename already meaningful identifiers.
-- Avoid collisions with existing locals and reserved Lua / Luau names.
-- If meaning is uncertain, prefer a neutral descriptive name over a guessed behavior.
+- Locals / functions: camelCase. Module exports: preserve the source's existing convention.
+- Do not rename strings, comments, literal table keys, API members after `.` / `:`, or unrelated bindings.
+- Do not rename unbound identifiers; they may be legitimate globals or missing devirtualized upvalues.
+- When meaning is uncertain, choose `localValue`, `state`, `item`, or `argument`, or preserve the original name.
+- Never assign a function a behavior name that its body does not support.
