@@ -1585,12 +1585,24 @@ def beautify(
     diagnostics: list[str] = []
     inferred_services: list[str] = []
     canonicalized_service_calls = 0
+    ast_metadata = {
+        "ast_backend": "lexical-fallback",
+        "ast_syntax_errors": None,
+        "partial_functions": [],
+        "possible_missing_upvalues": [],
+        "devirtualization_markers": [],
+        "scope_count": 0,
+    }
     if aggressive or semantic:
         tokens, bindings, decl_tokens, token_scopes, diagnostics = build_bindings(source, lex(source))
+        if get_ast_report is not None:
+            ast_metadata = get_ast_report(source)
         source, inferred_services = infer_missing_services(source, tokens, bindings, decl_tokens, token_scopes)
         if inferred_services:
             tokens, bindings, decl_tokens, _, refreshed_diagnostics = build_bindings(source, lex(source))
             diagnostics = refreshed_diagnostics
+            if get_ast_report is not None:
+                ast_metadata = get_ast_report(source)
         if semantic:
             source, rename_stats = rename_bindings(source, tokens, bindings, decl_tokens)
         else:
@@ -1614,13 +1626,6 @@ def beautify(
     if unresolved_generated:
         diagnostics.append("unbound generated-looking identifiers retained: " + ", ".join(unresolved_generated))
 
-    ast_metadata = get_ast_report(source) if get_ast_report is not None else {
-        "ast_backend": "lexical-fallback",
-        "ast_syntax_errors": None,
-        "partial_functions": [],
-        "possible_missing_upvalues": [],
-        "scope_count": 0,
-    }
     for marker in ast_metadata.get("devirtualization_markers", []):
         diagnostics.append(
             f"Unresolved devirtualization marker at line {marker['line']}: {marker['text']}"
