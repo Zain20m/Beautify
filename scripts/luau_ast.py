@@ -427,6 +427,17 @@ def build_ast_bindings(source: str, all_tokens: list, binding_type, scope_type, 
             function_nodes.append(node)
         stack.extend(reversed(node.named_children))
 
+    syntax_error_details = []
+    for error_node in syntax_nodes:
+        start = error_node.start_byte
+        end = max(start + 1, error_node.end_byte)
+        excerpt = raw[start:min(len(raw), end + 60)].decode("utf-8", errors="replace")
+        syntax_error_details.append({
+            "node_type": error_node.type,
+            "line": error_node.start_point.row + 1,
+            "excerpt": excerpt[:180],
+        })
+
     diagnostics = []
     if syntax_nodes:
         diagnostics.append(
@@ -452,6 +463,7 @@ def build_ast_bindings(source: str, all_tokens: list, binding_type, scope_type, 
     metadata = {
         "ast_backend": "tree-sitter-luau",
         "ast_syntax_errors": len(syntax_nodes),
+        "syntax_error_nodes": syntax_error_details,
         "partial_functions": partial_functions,
         "devirtualization_markers": devirtualization_markers,
         "possible_missing_upvalues": [
@@ -477,6 +489,7 @@ def get_ast_report(source: str) -> dict:
     return _ANALYSIS_CACHE.get(source, {
         "ast_backend": "lexical-fallback",
         "ast_syntax_errors": None,
+        "syntax_error_nodes": [],
         "partial_functions": [],
         "possible_missing_upvalues": [],
         "devirtualization_markers": [],
