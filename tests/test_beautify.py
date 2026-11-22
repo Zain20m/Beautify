@@ -141,7 +141,7 @@ v1:WaitForChild("requests"):WaitForChild("character"):WaitForChild("spawn"):Fire
         self.assertEqual(report["table_field_breaks"], 2)
 
     def test_auto_falls_back_for_incomplete_devirtualized_input(self):
-        source = 'local v1 = 1\nend\n'
+        source = 'local v1 = 1\nprint(v1)\nend\n'
         result, report = beautify.beautify(source, return_report=True, formatter="auto")
         self.assertIn('local value = 1', result)
         self.assertIn('unmatched', " ".join(report["diagnostics"]))
@@ -156,6 +156,52 @@ v1:WaitForChild("requests"):WaitForChild("character"):WaitForChild("spawn"):Fire
         self.assertEqual(report["formatter_used"], "stylua")
         self.assertTrue(report["ast_formatted"])
         self.assertIn('local Players = game:GetService("Players")', result)
+
+
+
+    def test_semantic_function_names_use_function_body(self):
+        source = '''local function handleEvent()
+    local live = workspace:FindFirstChild("Live")
+    for _, entry in pairs(live:GetChildren()) do
+        if string.sub(entry.Name, 1, 7) == prefix then
+            return entry
+        end
+    end
+end
+'''
+        result = beautify.beautify(source, formatter="fallback")
+        self.assertIn("local function findLiveEntityByPrefix()", result)
+        self.assertNotIn("handleEvent", result)
+
+    def test_semantic_names_infer_engine_objects_and_data(self):
+        source = '''local v1 = Instance.new("BodyVelocity")
+local v2 = Instance.new("BodyGyro")
+local value12 = raidDefinitions[selectedRaid]
+'''
+        result = beautify.beautify(source, formatter="fallback")
+        self.assertIn("local bodyVelocity = Instance.new", result)
+        self.assertIn("local bodyGyro = Instance.new", result)
+        self.assertIn("local raidDefinition = raidDefinitions[selectedRaid]", result)
+
+    def test_unused_generated_literal_is_removed_but_effectful_initializer_stays(self):
+        source = '''local v1 = 123
+local v2 = doWork()
+print(v2)
+'''
+        result, report = beautify.beautify(source, return_report=True, formatter="fallback")
+        self.assertNotIn("local v1", result)
+        self.assertIn("doWork()", result)
+        self.assertIn("print(value)", result)
+        self.assertEqual(report["removed_junk_statements"], 1)
+
+    def test_pure_cleanup_does_not_drop_effectful_table_pack_arguments(self):
+        source = '''table.pack(doWork())
+table.pack(1, 2, true)
+'''
+        result, report = beautify.beautify(source, return_report=True, formatter="fallback")
+        self.assertIn("table.pack(doWork())", result)
+        self.assertNotIn("table.pack(1, 2, true)", result)
+        self.assertEqual(report["removed_junk_statements"], 1)
 
 
     def test_trace_only_output_is_not_presented_as_source(self):
