@@ -276,7 +276,7 @@ print(v1)
         result, report = beautify.beautify(fixture.read_text(encoding="utf-8"), return_report=True, formatter="fallback")
         self.assertEqual(report["ast_backend"], "tree-sitter-luau", report)
         self.assertEqual(report["ast_syntax_errors"], 0, report)
-        self.assertIn("type PlayerRecord", result)
+        self.assertIn("value: T", result)
         self.assertIn("local function", result)
 
     def test_fixture_corpus_covers_register_string_pool_and_partial_outputs(self):
