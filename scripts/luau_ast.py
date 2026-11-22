@@ -18,7 +18,8 @@ WEAK_NAME = re.compile(
     r"arg\d*|Arg\d+|var_\d+|_l\d+|[A-Z]_\d+|L_\d+|loc\d+|"
     r"PROTO_\d+|STACK\d*|REGISTER\d*|R\d+|n\d*|flag\d*|"
     r"handleEvent\d*|sendRemoteEvent\d*|value\d*|numericValue\d*|"
-    r"remoteArgument\d*|eventConnection\d*|isFeatureEnabled\d*)$"
+    r"remoteArgument\d*|eventConnection\d*|isFeatureEnabled\d*|"
+    r"UPVALUE_\d+|upvalue_?\d*)$"
 )
 
 TYPE_NODES = {
