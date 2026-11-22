@@ -8,7 +8,10 @@ It does not reconstruct missing VM logic or change runtime behavior intentionall
 from __future__ import annotations
 
 import argparse
+import os
 import re
+import shutil
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -901,7 +904,8 @@ def indent_source(source: str) -> str:
         toks = lex(text)
         symbols = [t.value for t in toks if t.kind == "punct"]
         closes_table = 1 if symbols and symbols[0] == "}" else 0
-        out.append("    " * max(0, depth - leading + table_depth - closes_table) + text)
+        chain_indent = 1 if text.startswith((".", ":")) else 0
+        out.append("    " * max(0, depth - leading + table_depth - closes_table + chain_indent) + text)
         depth = max(0, depth + delta)
         table_depth = max(0, table_depth + symbols.count("{") - symbols.count("}"))
     return "\n".join(out)
@@ -1003,6 +1007,92 @@ def find_unresolved_generated_identifiers(source: str) -> list[str]:
         unresolved.add(tok.value)
     return sorted(unresolved, key=str.lower)
 
+
+def split_chained_calls(source: str, indent_width: int = 4) -> tuple[str, int]:
+    """Put each continuation in a method/property chain on its own indented line."""
+    tokens = significant(lex(source))
+    insertions: list[tuple[int, str]] = []
+    for index in range(1, len(tokens)):
+        token = tokens[index]
+        previous = tokens[index - 1]
+        if token.value not in (".", ":") or previous.value not in (")", "]", "}"):
+            continue
+        between = source[previous.end:token.start]
+        if "\n" in between or "\r" in between:
+            continue
+        line_start = source.rfind("\n", 0, token.start) + 1
+        leading = re.match(r"[ \t]*", source[line_start:token.start]).group(0)
+        insertions.append((token.start, "\n" + leading + (" " * indent_width)))
+    for position, text in reversed(insertions):
+        source = source[:position] + text + source[position:]
+    return source, len(insertions)
+
+
+def split_table_fields(source: str) -> tuple[str, int]:
+    """Move table fields onto separate lines while leaving call-argument commas alone."""
+    tokens = significant(lex(source))
+    paren_depth = bracket_depth = 0
+    table_stack: list[tuple[int, int]] = []
+    insertions: list[tuple[int, str]] = []
+    for token in tokens:
+        value = token.value
+        if value == "(":
+            paren_depth += 1
+        elif value == ")":
+            paren_depth = max(0, paren_depth - 1)
+        elif value == "[":
+            bracket_depth += 1
+        elif value == "]":
+            bracket_depth = max(0, bracket_depth - 1)
+        elif value == "{":
+            table_stack.append((paren_depth, bracket_depth))
+        elif value == "}" and table_stack:
+            table_stack.pop()
+        elif value == "," and table_stack:
+            table_paren, table_bracket = table_stack[-1]
+            if paren_depth == table_paren and bracket_depth == table_bracket:
+                following = source[token.end:token.end + 1]
+                if following not in ("\n", "\r"):
+                    insertions.append((token.end, "\n"))
+    for position, text in reversed(insertions):
+        source = source[:position] + text + source[position:]
+    return source, len(insertions)
+
+
+def find_stylua() -> str | None:
+    """Resolve StyLua from STYLUA_BIN or PATH."""
+    configured = os.environ.get("STYLUA_BIN")
+    if configured:
+        return configured if Path(configured).is_file() else None
+    return shutil.which("stylua")
+
+
+def format_with_stylua(source: str, timeout: int = 45) -> tuple[str | None, str | None]:
+    """Format and parse the complete source with StyLua's Luau parser."""
+    binary = find_stylua()
+    if not binary:
+        return None, "StyLua is not installed or was not found on PATH"
+    config_path = Path(__file__).resolve().parents[1] / ".stylua.toml"
+    command = [binary, "--syntax", "Luau", "--verify", "--stdin-filepath", "beautified.luau"]
+    if config_path.is_file():
+        command.extend(["--config-path", str(config_path)])
+    command.append("-")
+    try:
+        completed = subprocess.run(
+            command,
+            input=source,
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return None, f"StyLua could not run: {exc}"
+    if completed.returncode != 0:
+        message = (completed.stderr or completed.stdout or "StyLua rejected the input").strip()
+        return None, message[:700]
+    return completed.stdout, None
+
 def collapse_blank_lines(source: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", source).strip() + "\n"
 
@@ -1017,16 +1107,32 @@ def is_trace_only(source: str) -> bool:
     return False
 
 
-def beautify(source: str, aggressive: bool = True, semantic: bool = True, return_report: bool = False):
+def beautify(
+    source: str,
+    aggressive: bool = True,
+    semantic: bool = True,
+    return_report: bool = False,
+    formatter: str = "auto",
+):
+    if formatter not in ("auto", "stylua", "fallback"):
+        raise ValueError("formatter must be 'auto', 'stylua', or 'fallback'")
     if is_trace_only(source):
         out = "-- NOT SOURCE: behaviour / anti-tamper trace only\n-- No recoverable game logic in this input.\n"
-        return (out, {"renamed_bindings": 0, "diagnostics": []}) if return_report else out
+        report = {
+            "renamed_bindings": 0,
+            "diagnostics": [],
+            "formatter_used": "none",
+            "formatter_warning": None,
+        }
+        return (out, report) if return_report else out
+
     source = source.replace("\r\n", "\n").replace("\r", "\n")
     source = strip_banners(source)
     source = split_semicolons(source)
     source = split_control_blocks(source)
     source = normalize_spacing(source)
     source = strip_pure_junk(source)
+
     rename_stats: dict[str, int] = {}
     diagnostics: list[str] = []
     inferred_services: list[str] = []
@@ -1049,26 +1155,63 @@ def beautify(source: str, aggressive: bool = True, semantic: bool = True, return
     unresolved_generated = find_unresolved_generated_identifiers(source)
     if unresolved_generated:
         diagnostics.append("unbound generated-looking identifiers retained: " + ", ".join(unresolved_generated))
-    source = indent_source(source)
-    source = add_top_level_section_spacing(source)
+
+    formatter_used = "fallback"
+    formatter_warning = None
+    if formatter in ("auto", "stylua"):
+        formatted, formatter_error = format_with_stylua(source)
+        if formatted is not None:
+            source = formatted
+            formatter_used = "stylua"
+            # StyLua parsed and verified the result, so token-based block warnings
+            # from the conservative fallback scanner are no longer authoritative.
+            diagnostics = [
+                item for item in diagnostics
+                if item.startswith("unbound generated-looking identifiers retained:")
+            ]
+        elif formatter == "stylua":
+            raise RuntimeError(formatter_error or "StyLua formatting failed")
+        else:
+            formatter_warning = formatter_error
+
+    chain_breaks = 0
+    table_breaks = 0
+    if formatter_used == "fallback":
+        source, table_breaks = split_table_fields(source)
+        source, chain_breaks = split_chained_calls(source)
+        source = indent_source(source)
+        source = add_top_level_section_spacing(source)
+    else:
+        source, chain_breaks = split_chained_calls(source)
+        source = add_top_level_section_spacing(source)
     source = collapse_blank_lines(source)
+
     if not source.startswith("-- Beautified"):
         source = "-- Beautified from deobfuscator output\n\n" + source
     if diagnostics:
         notes = "\n".join("-- Beautifier note: " + item for item in diagnostics)
-        source = source.replace("-- Beautified from deobfuscator output\n", "-- Beautified from deobfuscator output\n" + notes + "\n")
+        source = source.replace(
+            "-- Beautified from deobfuscator output\n",
+            "-- Beautified from deobfuscator output\n" + notes + "\n",
+        )
+
     remaining_garbage = sum(
-        1 for tok in significant(lex(source))
-        if tok.kind == "ident" and GARBAGE_IDENT.fullmatch(tok.value)
+        1 for token in significant(lex(source))
+        if token.kind == "ident" and GARBAGE_IDENT.fullmatch(token.value)
     )
     report = {
         "renamed_bindings": sum(rename_stats.values()),
         "renamed_names": len(rename_stats),
         "inferred_services": inferred_services,
         "canonicalized_service_calls": canonicalized_service_calls,
+        "chain_breaks": chain_breaks,
+        "table_field_breaks": table_breaks,
         "unresolved_generated_identifiers": unresolved_generated,
         "diagnostics": diagnostics,
         "remaining_garbage": remaining_garbage,
+        "formatter_used": formatter_used,
+        "formatter_warning": formatter_warning,
+        "ast_formatted": formatter_used == "stylua",
     }
     return (source, report) if return_report else source
 
@@ -1079,9 +1222,25 @@ def main() -> int:
     parser.add_argument("-o", "--output", type=Path)
     parser.add_argument("--no-semantic", action="store_true")
     parser.add_argument("--report", action="store_true", help="print rename and structural diagnostics")
+    parser.add_argument(
+        "--formatter",
+        choices=("auto", "stylua", "fallback"),
+        default="auto",
+        help="auto uses StyLua when installed; fallback handles malformed/incomplete decompiler output",
+    )
     args = parser.parse_args()
     raw = args.input.read_text(encoding="utf-8", errors="replace")
-    out, report = beautify(raw, aggressive=True, semantic=not args.no_semantic, return_report=True)
+    try:
+        out, report = beautify(
+            raw,
+            aggressive=True,
+            semantic=not args.no_semantic,
+            return_report=True,
+            formatter=args.formatter,
+        )
+    except RuntimeError as exc:
+        print(f"formatting failed: {exc}", file=sys.stderr)
+        return 2
     if args.output:
         args.output.write_text(out, encoding="utf-8")
         print(f"wrote {args.output} ({len(out)} bytes)", file=sys.stderr)
