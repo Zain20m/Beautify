@@ -62,5 +62,5 @@ Begin with:
 -- Beautified from deobfuscator output
 ```
 
-Add short notes for structural problems, unresolved values, or likely devirtualization gaps. Do not claim the file passed syntax validation unless a Luau parser actually accepted it.
+Add short notes for structural problems, unbound generated-looking identifiers, unresolved values, or likely devirtualization gaps. Do not guess names for unbound identifiers that might be globals or missing upvalues. Do not claim the file passed syntax validation unless a Luau parser actually accepted it.
 
