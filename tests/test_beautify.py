@@ -119,7 +119,7 @@ end""", result)
         self.assertIn('print("a==b")', result)
 
     def test_unbound_generated_names_are_reported_not_guessed(self):
-        result, report = beautify.beautify('return H_1() + fn14(1)\\n', return_report=True)
+        result, report = beautify.beautify('return H_1() + fn14(1)\n', return_report=True)
         self.assertIn('return H_1() + fn14(1)', result)
         self.assertEqual(report["unresolved_generated_identifiers"], ["fn14", "H_1"])
         self.assertGreater(report["remaining_garbage"], 0)
