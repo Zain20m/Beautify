@@ -67,6 +67,63 @@ return v1.v2
         self.assertIn('\nend\n', result)
         self.assertTrue(any("unmatched 'end'" in item for item in report["diagnostics"]))
 
+
+    def test_reuses_existing_service_aliases(self):
+        source = """local ReplicatedStorage = game:GetService("ReplicatedStorage")
+game:GetService("ReplicatedStorage"):WaitForChild("requests"):FireServer()
+"""
+        result, report = beautify.beautify(source, return_report=True)
+        self.assertIn('ReplicatedStorage:WaitForChild("requests"):FireServer()', result)
+        self.assertNotIn('game:GetService("ReplicatedStorage"):WaitForChild', result)
+        self.assertEqual(report["canonicalized_service_calls"], 1)
+
+    def test_does_not_reuse_service_alias_before_or_under_shadowing(self):
+        source = """game:GetService("Players"):GetPlayers()
+local Players = game:GetService("Players")
+do
+    local Players = {}
+    game:GetService("Players"):GetPlayers()
+end
+game:GetService("Players"):GetPlayers()
+"""
+        result, report = beautify.beautify(source, return_report=True)
+        self.assertIn('game:GetService("Players"):GetPlayers()', result)
+        self.assertIn('Players:GetPlayers()', result)
+        self.assertEqual(report["canonicalized_service_calls"], 1)
+
+    def test_clean_indentation_and_function_spacing(self):
+        source = """local function fn1(a1) if a1 then return false else local v1=2 end end
+local function fn2() local v2=3;return v2 end
+"""
+        result = beautify.beautify(source)
+        self.assertIn("""local function handleEvent(value)
+    if value then
+        return false
+    else
+        local value2 = 2
+    end
+end
+
+local function handleEvent2()
+    local value3 = 3
+    return value3
+end""", result)
+        self.assertNotRegex(result, r"(?m)^        (?:end|else|elseif)\\s*$")
+        self.assertNotRegex(result, r"(?m)^.*[ \\t]+$")
+
+    def test_binary_operator_spacing_is_normalized(self):
+        result = beautify.beautify('local v1=2;local v2=v1+ -1;if v2>=1 and v2~=3 then print("a==b") end')
+        self.assertIn('local value = 2', result)
+        self.assertIn('local value2 = value + -1', result)
+        self.assertIn('if value2 >= 1 and value2 ~= 3 then', result)
+        self.assertIn('print("a==b")', result)
+
+    def test_unbound_generated_names_are_reported_not_guessed(self):
+        result, report = beautify.beautify('return H_1() + fn14(1)\\n', return_report=True)
+        self.assertIn('return H_1() + fn14(1)', result)
+        self.assertEqual(report["unresolved_generated_identifiers"], ["fn14", "H_1"])
+        self.assertGreater(report["remaining_garbage"], 0)
+
     def test_trace_only_output_is_not_presented_as_source(self):
         source = '-- BEHAVIOUR TRACE ONLY\n-- 12 statements recorded\nfunction x() end\nDescendantAdded math_floor_precision\n'
         result = beautify.beautify(source)
