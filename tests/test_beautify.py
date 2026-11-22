@@ -310,6 +310,91 @@ end
         self.assertTrue(any("possible missing upvalue" in item.lower() for item in report["diagnostics"]))
 
 
+
+    def test_tree_sitter_ast_handles_nested_shadowing(self):
+        source = '''local v1 = "outer"
+local function fn2(p1)
+    do
+        local v1 = "inner"
+        print(v1)
+    end
+    return v1
+end
+print(v1)
+'''
+        result, report = beautify.beautify(source, return_report=True, formatter="fallback")
+        self.assertEqual(report["ast_backend"], "tree-sitter-luau")
+        self.assertIn('local textValue = "outer"', result)
+        self.assertIn('local textValue2 = "inner"', result)
+        self.assertIn("print(textValue2)", result)
+        self.assertIn("return textValue", result)
+        self.assertIn("print(textValue)", result)
+
+    def test_ast_loop_and_repeat_scopes_are_resolved(self):
+        source = '''local v1 = "outside"
+for v1 = 1, 3 do
+    print(v1)
+end
+repeat
+    local v2 = 1
+until v2 > 2
+print(v1)
+'''
+        result, report = beautify.beautify(source, return_report=True, formatter="fallback")
+        self.assertEqual(report["ast_backend"], "tree-sitter-luau")
+        self.assertIn('local textValue = "outside"', result)
+        self.assertIn("for localValue = 1, 3 do", result)
+        self.assertIn("print(localValue)", result)
+        self.assertIn("until localValue2 > 2", result)
+        self.assertIn("print(textValue)", result)
+
+    def test_ast_function_name_uses_syntax_evidence(self):
+        fixture = ROOT / "tests" / "fixtures" / "register_vm_style.lua"
+        result, report = beautify.beautify(fixture.read_text(encoding="utf-8"), return_report=True, formatter="fallback")
+        self.assertEqual(report["ast_backend"], "tree-sitter-luau")
+        self.assertIn("local function isCharacterAlive", result)
+        self.assertGreater(report["ast_scope_count"], 1)
+        self.assertTrue(report["semantic_name_decisions"])
+
+    def test_ast_parses_typed_luau_and_generic_functions(self):
+        fixture = ROOT / "tests" / "fixtures" / "luau_typed_scopes.luau"
+        result, report = beautify.beautify(fixture.read_text(encoding="utf-8"), return_report=True, formatter="fallback")
+        self.assertEqual(report["ast_backend"], "tree-sitter-luau")
+        self.assertEqual(report["ast_syntax_errors"], 0)
+        self.assertIn("type PlayerRecord", result)
+        self.assertIn("local function", result)
+
+    def test_fixture_corpus_covers_register_string_pool_and_partial_outputs(self):
+        fixtures = ROOT / "tests" / "fixtures"
+        valid_names = ("register_vm_style.lua", "string_pool_closure.lua", "luau_typed_scopes.luau")
+        for name in valid_names:
+            source = (fixtures / name).read_text(encoding="utf-8")
+            _, report = beautify.beautify(source, return_report=True, formatter="fallback")
+            self.assertEqual(report["ast_backend"], "tree-sitter-luau", name)
+            self.assertEqual(report["ast_syntax_errors"], 0, name)
+
+        partial_source = (fixtures / "partial_vm_lifter.lua").read_text(encoding="utf-8")
+        _, partial_report = beautify.beautify(partial_source, return_report=True, formatter="fallback")
+        self.assertGreater(partial_report["ast_syntax_errors"], 0)
+        self.assertTrue(partial_report["partial_functions"])
+        self.assertTrue(partial_report["possible_missing_upvalues"])
+
+    def test_unbound_upvalues_are_reported_without_fabricated_definitions(self):
+        source = '''local function fn14(player)
+    if player then
+        return H_1(player) + UPVALUE_3
+    end
+    return fn77
+end
+'''
+        result, report = beautify.beautify(source, return_report=True, formatter="fallback")
+        names = {item["name"] for item in report["possible_missing_upvalues"]}
+        self.assertTrue({"H_1", "UPVALUE_3", "fn77"}.issubset(names))
+        self.assertNotIn("local H_1", result)
+        self.assertNotIn("local UPVALUE_3", result)
+        self.assertTrue(any("possible missing upvalue" in item.lower() for item in report["diagnostics"]))
+
+
     def test_trace_only_output_is_not_presented_as_source(self):
         source = '-- BEHAVIOUR TRACE ONLY\n-- 12 statements recorded\nfunction x() end\nDescendantAdded math_floor_precision\n'
         result = beautify.beautify(source, formatter="fallback")
