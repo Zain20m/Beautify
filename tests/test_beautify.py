@@ -205,6 +205,27 @@ table.pack(1, 2, true)
         self.assertEqual(report["removed_junk_statements"], 1)
 
 
+
+    def test_renames_fluent_option_temporaries_from_their_value_source(self):
+        source = '''local value = fluentLibrary.Options.TargetPlayer.Value
+print(value)
+'''
+        result = beautify.beautify(source, formatter="fallback")
+        self.assertIn("local targetPlayerName = fluentLibrary.Options.TargetPlayer.Value", result)
+        self.assertIn("print(targetPlayerName)", result)
+
+    def test_callback_boolean_parameter_uses_function_context(self):
+        source = '''local function updateButtonAppearance(argument)
+    if argument then
+        return Color3.fromRGB(255, 255, 255)
+    end
+end
+'''
+        result = beautify.beautify(source, formatter="fallback")
+        self.assertIn("local function updateButtonAppearance(isHovered)", result)
+        self.assertIn("if isHovered then", result)
+
+
     def test_trace_only_output_is_not_presented_as_source(self):
         source = '-- BEHAVIOUR TRACE ONLY\n-- 12 statements recorded\nfunction x() end\nDescendantAdded math_floor_precision\n'
         result = beautify.beautify(source, formatter="fallback")
