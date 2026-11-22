@@ -152,8 +152,7 @@ def _is_reference_identifier(node) -> bool:
     if parent.type == "for_numeric_clause" and _field_is(parent, node, "name"):
         return False
     if parent.type == "function_declaration" and _field_is(parent, node, "name"):
-        if _is_local_function(parent):
-            return False
+        return False
     if parent.type == "generic_type_list":
         return False
     if parent.type == "attribute":
