@@ -16,6 +16,12 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+try:
+    from luau_ast import build_ast_bindings, get_ast_report
+except ImportError:
+    build_ast_bindings = None
+    get_ast_report = None
+
 BANNER_RE = re.compile(
     r"^\s*--\s*(Deobfuscated by|Detected obfuscation|Local names are inferred|"
     r"NOTE:\s*reconstructed|DAILY DEOBF|BEHAVIOUR TRACE ONLY|run status:|"
@@ -372,7 +378,7 @@ def attach_function_bodies(source: str, tokens: list[Token], bindings: list[Bind
                 break
 
 
-def build_bindings(source: str, all_tokens: list[Token]) -> tuple[list[Token], list[Binding], dict[int, Binding], dict[int, Scope], list[str]]:
+def _build_bindings_lexical(source: str, all_tokens: list[Token]) -> tuple[list[Token], list[Binding], dict[int, Binding], dict[int, Scope], list[str]]:
     """Build approximate lexical scopes and resolve local identifier references."""
     tokens = significant(all_tokens)
     root = Scope(None, 0, len(source) + 1, label="root")
@@ -564,6 +570,27 @@ def infer_missing_services(
     # Keep inferred aliases adjacent to service declarations already at the top.
     return prefix + spacer + aliases + "\n" + body, missing
 
+
+
+def build_bindings(source: str, all_tokens: list[Token]):
+    """Prefer Tree-sitter lexical scopes, retaining the token scanner as fallback."""
+    if build_ast_bindings is not None:
+        try:
+            result = build_ast_bindings(
+                source,
+                all_tokens,
+                Binding,
+                Scope,
+                _function_context,
+            )
+            if result is not None:
+                return result
+        except Exception as exc:
+            # Parser/tooling errors must not prevent the conservative fallback from running.
+            ast_error = f"Luau AST analysis unavailable for this file: {type(exc).__name__}"
+            tokens, bindings, declarations, scopes, diagnostics = _build_bindings_lexical(source, all_tokens)
+            return tokens, bindings, declarations, scopes, diagnostics + [ast_error]
+    return _build_bindings_lexical(source, all_tokens)
 
 def _token_slice(source: str, tokens: list[Token], start_index: int, end_index: int) -> str:
     if start_index >= end_index or start_index >= len(tokens):
