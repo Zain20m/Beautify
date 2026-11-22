@@ -1,113 +1,79 @@
 ---
 name: beautify
-description: Clean already-deobfuscated Roblox Luau using scope-aware renaming, conservative junk removal, formatting, and structural diagnostics.
+description: Clean, semantically rename, and format already-deobfuscated Roblox Luau while preserving source behavior and reporting incomplete recovery.
 license: MIT
 metadata:
-  version: "4.0"
-  focus: roblox-luau-deobf-cleanup
+  version: "5.0"
+  focus: roblox-luau-semantic-cleanup
 ---
 
 # Beautify
 
-Beautify makes recovered Roblox / Luau easier to read. It does not reverse a VM, invent missing logic, or certify that a deobfuscated file runs.
-
-## When to use
-
-- After a deobfuscator has produced Lua / Luau source.
-- Files containing generated names such as `v1`, `tbl4`, `Arg3`, `_l173`, `fn2`, or `t_1`.
-- Semicolon-packed or inline control-flow statements.
-- Decompiled output with tool banners or obvious standalone noise.
-
-Do not present a probe-only trace as recovered source.
+Beautify turns recovered Roblox / Luau into readable source. It does not reverse a VM, invent missing logic, or guarantee runtime correctness.
 
 ## Workflow
-
-Run the beautifier:
 
 ```bash
 python3 scripts/beautify.py input.lua -o clean.lua --report --formatter auto
 ```
 
-Install StyLua for complete Luau AST formatting:
+Install StyLua for full Luau syntax-aware formatting:
 
 ```bash
 pip install git+https://github.com/JohnnyMorganz/StyLua@v2.6.0
 ```
 
-Use `--formatter stylua` to require syntax-aware formatting, `--formatter auto` to use StyLua when available and safely fall back for malformed input, or `--formatter fallback` to force the built-in formatter.
+Use `--formatter auto` to prefer StyLua and fall back on malformed input, `--formatter stylua` to require parser validation, or `--formatter fallback` for best-effort formatting only.
 
-Then inspect the report and output. Keep the original deobfuscator output unchanged as a fallback.
+## Whole-file semantic renaming
 
-## What the engine does
+Do not stop after replacing a few obvious names. Process the entire source file from top to bottom:
 
-1. Tokenizes source while distinguishing identifiers, strings, long-bracket strings, and comments.
-2. Tracks approximate lexical scopes for locals, function parameters, and loop variables.
-3. Renames generated identifiers by binding, so shadowed variables are not globally replaced together.
-4. Uses nearby API and function context to suggest names such as `Players`, `localPlayer`, `humanoid`, `rootPart`, `inputBeganConn`, or `activateNpcPrompts`.
-5. Infers known Roblox service aliases only when a bare service identifier is otherwise unbound, then reuses any in-scope service local instead of repeating `game:GetService(...)` calls.
-6. Runs StyLua's Luau parser/printer over the complete file when available, formatting statements, expressions, tables, callbacks, control flow, operators, and chains.
-7. Enforces a readable one-call-per-line method-chain layout and consistent blank lines.
-8. Uses the fallback token formatter when source is incomplete or cannot be parsed. The fallback expands many semicolon chains and inline blocks, formats table fields and method chains, and reports that it could not perform AST formatting.
-9. Removes only narrowly recognized tool banners, pure constant-expression noise, and empty `do end` padding.
-10. Reports unmatched `end` / `until` tokens and unbound generated-looking identifiers. Unbound names are not renamed automatically because they may be globals or missing devirtualized upvalues.
+1. Build a lexical binding map for locals, local functions, function parameters, and loop variables. Resolve each use to its declaration, so shadowed names are handled independently.
+2. Keep meaningful source names. Identify both obfuscator names (`v12`, `tbl4`, `Arg2`, `_l173`, `fn3`) and weak names left by earlier Beautify passes (`handleEvent`, `sendRemoteEvent`, `value12`, `numericValue2`).
+3. Name each local function from its complete body and nearby API usage. Look for the job it performs, not just the first API call. Examples: character refresh, player lookup, quest tracking, spectating, flight start/stop, raid management, UI updates, and task lifecycle.
+4. Name callback parameters from the signal or callback role (`CharacterAdded` -> `character`, `InputBegan` -> `input`, `OnClientEvent` -> `action` / `payload`) and refine them from properties used in the body.
+5. Name temporaries from their initializer, later assignments, constructors, member access, and surrounding function context. Examples: `Instance.new("BodyVelocity")` -> `bodyVelocity`; `FindFirstChildOfClass("Humanoid")` -> `humanoid`; a lookup in `raidDefinitions` -> `raidDefinition`.
+6. Prefer action + target names for functions (`findLiveEntityByPrefix`, `startFlight`, `autoUseChestItems`) and role + type names for values (`targetPlayerName`, `rootPart`, `missionTask`).
+7. Make replacements unique and avoid reserved words or collisions. Never rename member names after `.` or `:`, table keys, strings, comments, or unrelated scopes.
+8. When the evidence is weak, use a neutral but readable fallback such as `localValue`, `item`, `state`, or `argument`. Do not guess names for unbound globals or missing upvalues.
 
-StyLua supplies the complete syntax-aware formatting path. The scope tracker used for renaming is still conservative and is not a complete Luau AST.
+Re-running Beautify should improve its own generic intermediate names, not leave `handleEvent` or `value12` as the final result when contextual evidence is available.
 
-## Naming rules
+## Formatting
 
-- Preserve meaningful names already present.
-- Rename only weak/generated local bindings, parameters, and loop variables.
-- Never rename text inside strings or comments.
-- Never rename member names after `.` or `:`, or literal table keys.
-- Prefer clear camelCase locals, event names ending in `Conn`, and known service names.
-- When meaning is unclear, use neutral names such as `value`, `item`, `state`, or `argument`.
-- Make generated replacements unique within the file to avoid accidental collisions.
+- Use StyLua's Luau parser/printer for complete-file formatting when available.
+- Format statements, multiline expressions, tables, callbacks, method chains, operators, and control blocks consistently.
+- Reuse an already-declared service local when it is lexically in scope. For example, after declaring `ReplicatedStorage`, use it instead of repeating `game:GetService("ReplicatedStorage")`.
+- Keep the source order. Do not reorganize functions or callbacks if doing so could alter initialization order.
+- If the input is malformed, use the fallback formatter and report the limitations. Do not claim that fallback output is parser-validated.
 
-## Cleanup safety
+## Safe junk removal
 
-Delete a statement only when it is confidently a recognized deobfuscator banner or a standalone expression known to be pure and constant. When unsure, keep it.
+Remove only code that is confidently inert:
 
-Do not strip arbitrary `pcall`, remote calls, task scheduling, property assignments, authentication, integrity checks, or licensing logic. Do not reorder services, callbacks, or user statements because ordering may matter.
+- Recognized deobfuscator banners and metadata comments.
+- Empty `do end` padding.
+- Standalone pure constant expressions, such as `type(123)` or `bit32.bxor(12, 3)`.
+- An unused generated local whose initializer is only a scalar literal or a literal-only table.
 
-Never delete unmatched block tokens to make the output look valid. Report them and preserve the source fragment. If the deobfuscator emitted an expression marker such as `devirt: value ...`, keep it visible as an unresolved recovery artifact.
+Keep calls with possible side effects, including `pcall`, `task.spawn`, remote calls, property writes, indexing through dynamic objects, and function calls inside `table.pack`. Keep unknown statements. Never delete code just because it looks unusual or contains a generated-looking token.
+
+## Recovery diagnostics
+
+- Report unmatched `end` / `until` tokens.
+- Report unbound generated-looking identifiers without automatically renaming them; they may be globals or missing VM upvalues.
+- Preserve explicit devirtualization markers such as `devirt: value ...`.
+- If a sample is incomplete, say it is formatted partial output, not recovered source.
 
 ## Validation
-
-Run the tests:
 
 ```bash
 python3 -m unittest discover -s tests -v
 ```
 
-CI installs the pinned StyLua release and tests both the AST formatter and the malformed-input fallback.
+CI also runs StyLua against the example files. For real inputs, keep the original file and inspect the `--report` output, especially `remaining_garbage`, `unresolved_generated_identifiers`, `removed_junk_statements`, and parser diagnostics.
 
-For a user sample:
+## Repository integration
 
-1. Keep the original file.
-2. Run Beautify with `--report`.
-3. Check string and comment preservation.
-4. Review all structural diagnostics and devirtualization markers.
-5. Use a Luau parser / formatter separately when one is available.
-6. Do not claim successful syntax validation unless a parser actually accepted the file.
-
-## Discord / bot integration
-
-When integrated into a deobfuscation bot, run Beautify after the engine successfully produces Lua output and before sending the result. Attach the complete cleaned file for large outputs. If beautification fails, deliver the original recovered output where possible and explain that cleanup failed. Keep this optional for non-Discord integrations.
-
-If the engine only produced anti-tamper probes, behavior traces, or incomplete output, label it as diagnostic / incomplete rather than recovered source.
-
-## Luraph / anti-tamper handling
-
-- Strip only explicit deobfuscator banners and known metadata comments.
-- Do not delete code merely because it mentions `Path2D`, `ScreenGui`, events, task scheduling, URLs, debugging, or Luraph.
-- Do not blindly remove script-owned integrity, licensing, authentication, or environment checks.
-- Treat version-specific generated preambles as a separate, evidence-based cleanup step. Stop at the first unknown statement; never skip over it and continue deleting later code.
-- Preserve the input if a cleanup step causes structural validation to worsen.
-
-## Repository layout
-
-- `scripts/beautify.py`: CLI engine
-- `tests/test_beautify.py`: regression suite
-- `AI_PROMPT.md`: prompt for a deeper assisted rewrite
-- `rules/`: naming and strip guidance
-- `examples/`: before / after examples
+After a deobfuscator succeeds, a bot may run Beautify before delivering the recovered Lua. Attach the whole output file for large results. If Beautify fails, deliver the original deobfuscator output when possible. Never turn a behavior trace or malformed partial result into a claimed successful deobfuscation.
