@@ -981,7 +981,7 @@ def add_top_level_section_spacing(source: str) -> str:
     out: list[str] = []
     for line in source.splitlines():
         stripped = line.strip()
-        is_top_level_function = bool(re.match(r"^(?:local\\s+)?function\\b", stripped)) and not line[:1].isspace()
+        is_top_level_function = bool(re.match(r"^(?:local\s+)?function\b", stripped)) and not line[:1].isspace()
         if is_top_level_function and out and out[-1].strip():
             out.append("")
         out.append(line.rstrip())
