@@ -41,8 +41,8 @@ GARBAGE_IDENT = re.compile(
     r"arg|Arg\d+|arg\d+|ARG\d+|var_\d+|_l\d+|L_\d+|[A-Z]_\d+|loc\d+|"
     r"PROTO_\d+|STACK\d*|REGISTER\d*|R\d+|n\d*|flag\d*|thread\d*|"
     r"connection\d*|lib\d*|tween\d*|paragraph\d*|cFrame|"
-    r"handleEvent\d*|sendRemoteEvent\d*|value\d+|numericValue\d+|"
-    r"remoteArgument\d+|argument\d+|eventConnection\d*|isFeatureEnabled\d*)$"
+    r"handleEvent\d*|sendRemoteEvent\d*|value\d*|numericValue\d*|"
+    r"remoteArgument\d*|argument\d*|item\d*|eventConnection\d*|isFeatureEnabled\d*)$"
 )
 
 def is_weak_identifier(name: str) -> bool:
@@ -662,11 +662,14 @@ def infer_semantic_value_name(
     initializer: str,
     assignment_context: str,
     local_context: str,
+    function_context: str = "",
 ) -> str | None:
-    """Infer names for temporaries from constructors, fields, and their uses."""
-    combined = " ".join((initializer, assignment_context, local_context))
+    """Infer names for temporaries from constructors, fields, callbacks, and uses."""
+    combined = " ".join((initializer, assignment_context, local_context, function_context))
     low = combined.lower()
     init_low = initializer.lower()
+    function_low = function_context.lower()
+    function_compact = re.sub(r"\s+", "", function_low)
 
     # Concrete Roblox instance constructors and returned engine objects.
     constructor_names = {
@@ -674,7 +677,7 @@ def infer_semantic_value_name(
         "bodygyro": "bodyGyro",
         "bodyposition": "bodyPosition",
         "bodymover": "bodyMover",
-        "screen gui": "screenGui",
+        "screengui": "screenGui",
         "textbutton": "textButton",
         "textlabel": "textLabel",
         "uicorner": "uiCorner",
@@ -725,6 +728,10 @@ def infer_semantic_value_name(
         return "selectedRaidName"
     if "selectedworkouts.value" in low:
         return "selectedWorkoutName"
+    if binding.role == "parameter" and "updatebuttonappearance" in function_low:
+        return "isHovered"
+    if binding.role == "parameter" and "tweenservice" in low and "color3.fromrgb" in function_compact:
+        return "isHovered"
 
     # Infer the object type from the properties used in this binding's context.
     if ".health" in low and (".walkspeed" in low or ".jumppower" in low):
@@ -944,11 +951,17 @@ def infer_binding_names(source: str, tokens: list[Token], bindings: list[Binding
             if semantic_function_name:
                 hint = semantic_function_name
 
+        function_context = ""
+        if b.scope.function_token is not None and b.scope.function_end is not None:
+            function_context = " ".join(
+                token.value for token in tokens[b.scope.function_token:b.scope.function_end + 1]
+            )
         semantic_value_name = infer_semantic_value_name(
             b,
             init,
             assignment_context,
             local_context,
+            function_context,
         )
         if semantic_value_name:
             hint = semantic_value_name
