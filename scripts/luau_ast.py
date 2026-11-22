@@ -289,7 +289,7 @@ def build_ast_bindings(source: str, all_tokens: list, binding_type, scope_type, 
             if variables is not None:
                 add_variable_list(variables, loop_scope, active_from, "loop")
             for child in clause.named_children:
-                if child is not variables:
+                if child.id != variables.id:
                     visit(child, scope)
         elif clause is not None and clause.type == "for_numeric_clause":
             name_node = clause.child_by_field_name("name")
@@ -348,7 +348,7 @@ def build_ast_bindings(source: str, all_tokens: list, binding_type, scope_type, 
                         binding.function_context = function_context(tokens, function_index) if function_index is not None else ""
 
             for child in node.named_children:
-                if child is not variable_list:
+                if child.id != variable_list.id:
                     visit(child, scope)
             return
         if node_type == "for_statement":
