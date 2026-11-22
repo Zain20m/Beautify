@@ -73,7 +73,7 @@ return v1.v2
 game:GetService("ReplicatedStorage"):WaitForChild("requests"):FireServer()
 """
         result, report = beautify.beautify(source, return_report=True, formatter="fallback")
-        self.assertIn('ReplicatedStorage:WaitForChild("requests"):FireServer()', result)
+        self.assertIn('ReplicatedStorage:WaitForChild("requests")\n    :FireServer()', result)
         self.assertNotIn('game:GetService("ReplicatedStorage"):WaitForChild', result)
         self.assertEqual(report["canonicalized_service_calls"], 1)
 
@@ -87,7 +87,7 @@ end
 game:GetService("Players"):GetPlayers()
 """
         result, report = beautify.beautify(source, return_report=True, formatter="fallback")
-        self.assertIn('game:GetService("Players"):GetPlayers()', result)
+        self.assertIn('game:GetService("Players")\n    :GetPlayers()', result)
         self.assertIn('Players:GetPlayers()', result)
         self.assertEqual(report["canonicalized_service_calls"], 1)
 
