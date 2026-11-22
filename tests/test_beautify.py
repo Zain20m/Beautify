@@ -108,8 +108,8 @@ local function handleEvent2()
     local value3 = 3
     return value3
 end""", result)
-        self.assertNotRegex(result, r"(?m)^        (?:end|else|elseif)\\s*$")
-        self.assertNotRegex(result, r"(?m)^.*[ \\t]+$")
+        self.assertNotRegex(result, r"(?m)^        (?:end|else|elseif)\s*$")
+        self.assertNotRegex(result, r"(?m)^.*[ \t]+$")
 
     def test_binary_operator_spacing_is_normalized(self):
         result = beautify.beautify('local v1=2;local v2=v1+ -1;if v2>=1 and v2~=3 then print("a==b") end')
