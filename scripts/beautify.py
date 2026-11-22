@@ -777,7 +777,7 @@ def infer_semantic_function_name(binding: Binding) -> str | None:
 
 
 
-def binding_usage_context(binding: Binding, tokens: list[Token], radius: int = 7) -> str:
+def binding_usage_context(binding: Binding, tokens: list[Token], radius: int = 3) -> str:
     """Collect token neighborhoods around this binding's actual references."""
     chunks = []
     for reference in binding.refs:
@@ -1599,6 +1599,7 @@ def beautify(
     ast_metadata = {
         "ast_backend": "lexical-fallback",
         "ast_syntax_errors": None,
+        "syntax_error_nodes": [],
         "partial_functions": [],
         "possible_missing_upvalues": [],
         "devirtualization_markers": [],
@@ -1709,6 +1710,7 @@ def beautify(
         "unresolved_generated_identifiers": unresolved_generated,
         "ast_backend": ast_metadata.get("ast_backend", "lexical-fallback"),
         "ast_syntax_errors": ast_metadata.get("ast_syntax_errors"),
+        "syntax_error_nodes": ast_metadata.get("syntax_error_nodes", []),
         "ast_scope_count": ast_metadata.get("scope_count", 0),
         "partial_functions": ast_metadata.get("partial_functions", []),
         "possible_missing_upvalues": ast_metadata.get("possible_missing_upvalues", []),
