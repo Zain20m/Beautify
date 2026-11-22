@@ -13,11 +13,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - uses: JohnnyMorganz/stylua-action@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          version: v2.6.0
+          args: false
       - name: Compile beautifier
         run: python -m py_compile scripts/beautify.py
       - name: Run regression tests
         run: python -m unittest discover -s tests -v
-      - name: Smoke test examples
+      - name: Smoke test examples with the Luau parser
         run: |
-          python scripts/beautify.py examples/before.lua -o /tmp/beautified.lua --report
-          python scripts/beautify.py examples/before_extreme.lua -o /tmp/beautified-extreme.lua --report
+          python scripts/beautify.py examples/before.lua -o /tmp/beautified.lua --formatter stylua --report
+          python scripts/beautify.py examples/before_extreme.lua -o /tmp/beautified-extreme.lua --formatter stylua --report
