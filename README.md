@@ -44,9 +44,9 @@ Options:
 python3 -m unittest discover -s tests -v
 ```
 
-The regression suite covers AST shadowing, loops and repeat scopes, typed/generic Luau, closure/string-pool patterns, representative register-style decompiler output, malformed function bodies, missing-upvalue placeholders, contextual names, service alias reuse, full formatting, and safe junk removal.
+The suite combines focused regression fixtures with deterministic generated-input invariants. Generated cases exercise nested shadowing, closures, loop scopes, Unicode comments, literal preservation, parse validity, and second-pass stability. CI runs on Python 3.10, 3.11, and 3.12.
 
-The files under `tests/fixtures/` are representative synthetic fixtures. They test parsing and recovery patterns; they are not claimed to be complete samples from every proprietary obfuscator.
+The files under `tests/fixtures/` are representative synthetic fixtures. They test parsing and recovery patterns; they are not claimed to be complete samples from every proprietary obfuscator. Add sanitized real-world failures as new fixtures with the expected behavior documented.
 
 ## Recovery and safety limits
 
