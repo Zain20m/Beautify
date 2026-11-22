@@ -1,129 +1,101 @@
 ---
 name: beautify
-description: Clean deobfuscated Roblox Luau into readable source. Strip Luraph/deobf junk, kill v1 tbl4 Arg4 _l173 names, expand minified lines, rename from GetService LocalPlayer WaitForChild usage. Use when the user says beautify, clean deobfuscated, readable lua, rename tbl/Arg/v locals, or post-process Luraph/IronBrew/Discord deobf output.
+description: Clean already-deobfuscated Roblox Luau using scope-aware renaming, conservative junk removal, formatting, and structural diagnostics.
 license: MIT
 metadata:
-  version: "2.0"
+  version: "3.0"
   focus: roblox-luau-deobf-cleanup
 ---
 
 # Beautify
 
-Turn messy **deobfuscated** Roblox / Luau into clean, readable scripts. Do not invent game logic.
+Beautify makes recovered Roblox / Luau easier to read. It does not reverse a VM, invent missing logic, or certify that a deobfuscated file runs.
 
 ## When to use
 
-- After Luraph / IronBrew / generic VM deobfuscation
-- File full of `v1`, `tbl4`, `Arg3`, `_l173`, `fn2`
-- Minified one-line walls of locals
-- Tool banners (`Deobfuscated by`, `statements recorded`, `BEHAVIOUR TRACE ONLY`)
+- After a deobfuscator has produced Lua / Luau source.
+- Files containing generated names such as `v1`, `tbl4`, `Arg3`, `_l173`, `fn2`, or `t_1`.
+- Semicolon-packed or inline control-flow statements.
+- Decompiled output with tool banners or obvious standalone noise.
+
+Do not present a probe-only trace as recovered source.
 
 ## Workflow
 
-1. If input is **only** anti-tamper probes / behaviour trace (DescendantAdded spam + `math_floor_precision`, no real payload), say so and stop. Do not fake a script.
-2. Prefer running `scripts/beautify.py` first for mechanical cleanup.
-3. Then apply the semantic pass in this skill (or paste `AI_PROMPT.md` into an AI) for human names.
+Run the mechanical beautifier first:
 
 ```bash
-python3 scripts/beautify.py input.lua -o clean.lua
+python3 scripts/beautify.py input.lua -o clean.lua --report
 ```
 
-## Mechanical rules (CLI + agent)
+Then inspect the report and output. Keep the original deobfuscator output unchanged as a fallback.
 
-**Always strip**
+## What the engine does
 
-- Deobfuscator banners and status comments
-- Pure junk statements (`bit32.*` on constants, `type(123)`, empty `do end`)
+1. Tokenizes source while distinguishing identifiers, strings, long-bracket strings, and comments.
+2. Tracks approximate lexical scopes for locals, function parameters, and loop variables.
+3. Renames generated identifiers by binding, so shadowed variables are not globally replaced together.
+4. Uses nearby API and function context to suggest names such as `Players`, `localPlayer`, `humanoid`, `rootPart`, `inputBeganConn`, or `activateNpcPrompts`.
+5. Infers known Roblox service aliases only when a bare service identifier is otherwise unbound.
+6. Expands semicolon chains and common inline blocks, normalizes assignment / comma spacing, and applies indentation.
+7. Removes only narrowly recognized tool banners, pure constant-expression noise, and empty `do end` padding.
+8. Reports unmatched `end` / `until` tokens and remaining generated-name patterns.
 
-**Always expand**
+The scope tracker is intentionally conservative and is not a complete Luau AST or compiler.
 
-- Minified `;local` / `;function` chains onto separate lines
-- Indent with 4 spaces using simple keyword depth
+## Naming rules
 
-**Rename (mandatory on full beautify)**
+- Preserve meaningful names already present.
+- Rename only weak/generated local bindings, parameters, and loop variables.
+- Never rename text inside strings or comments.
+- Never rename member names after `.` or `:`, or literal table keys.
+- Prefer clear camelCase locals, event names ending in `Conn`, and known service names.
+- When meaning is unclear, use neutral names such as `value`, `item`, `state`, or `argument`.
+- Make generated replacements unique within the file to avoid accidental collisions.
 
-| Pattern | Prefer |
-|---------|--------|
-| `game:GetService("Players")` binding | `Players` (same for other services) |
-| `*.LocalPlayer` | `localPlayer` |
-| `WaitForChild("Remotes")` etc. | camelCase / known map (`remotes`, `hitRemote`, `rootPart`) |
-| Function body uses FireServer | `fireRemote` / better from context |
-| Function body uses Humanoid + root | `getHumanoidAndRoot` / `setupCharacter` |
-| `:Connect` result local | `characterAddedConn`, `inputBeganConn`, ... |
-| Leftover `v#` `tbl#` `Arg#` `_l#` | neutral `valueN` / `dataN` / `paramN` / `nodeN` — never leave garbage |
+## Cleanup safety
 
-## Agent semantic pass (after CLI)
+Delete a statement only when it is confidently a recognized deobfuscator banner or a standalone expression known to be pure and constant. When unsure, keep it.
 
-Walk top to bottom:
+Do not strip arbitrary `pcall`, remote calls, task scheduling, property assignments, authentication, integrity checks, or licensing logic. Do not reorder services, callbacks, or user statements because ordering may matter.
 
-1. Group services at top, then state, then helpers, then connections.
-2. Rename **every** remaining garbage ident from usage — not just three.
-3. Prefer `local function name()` forms.
-4. Keep `pcall` / `task.spawn` / remotes / property writes.
-5. Self-check zero `tbl#` / `Arg#` / `_l#` / bare `v#` left.
+Never delete unmatched block tokens to make the output look valid. Report them and preserve the source fragment. If the deobfuscator emitted an expression marker such as `devirt: value ...`, keep it visible as an unresolved recovery artifact.
 
-Full AI paste prompt lives in `AI_PROMPT.md`. Extreme teaching pair: `examples/before_extreme.lua` → `examples/after_extreme.lua`.
+## Validation
 
-## Hard limits
+Run the tests:
 
-- Never invent missing logic or recover source from a probe-only trace.
-- Never claim behaviour changed for the better without preserving semantics.
-- When unsure whether a statement is junk, keep it.
+```bash
+python3 -m unittest discover -s tests -v
+```
 
-## Repo layout
+For a user sample:
 
-- `scripts/beautify.py` — default aggressive + semantic mechanical pass
-- `AI_PROMPT.md` — copy into any AI for full rewrite
-- `rules/naming.md`, `rules/strip_list.md`
-- `examples/` — medium + extreme before/after
+1. Keep the original file.
+2. Run Beautify with `--report`.
+3. Check string and comment preservation.
+4. Review all structural diagnostics and devirtualization markers.
+5. Use a Luau parser / formatter separately when one is available.
+6. Do not claim successful syntax validation unless a parser actually accepted the file.
 
-## Output validation
+## Discord / bot integration
 
-- Check the actual deobfuscated samples, not just a hand-picked example. Include different obfuscator versions and difficult outputs where available.
-- Separate deobfuscation failures from readability problems. Beautify can clean recovered Luau, but it cannot reconstruct source that the deobfuscator failed to recover.
-- Compare the script before and after cleanup. Preserve behavior, side effects, control flow, and all statements whose purpose is uncertain.
-- Test changes against the sample set and check for regressions in other supported versions. Keep fixes focused; do not rewrite unrelated engines or add unnecessary features.
-- If an input is incomplete or only a behavior trace, clearly label that limitation instead of presenting it as recovered source.
+When integrated into a deobfuscation bot, run Beautify after the engine successfully produces Lua output and before sending the result. Attach the complete cleaned file for large outputs. If beautification fails, deliver the original recovered output where possible and explain that cleanup failed. Keep this optional for non-Discord integrations.
 
-## Automatic Discord post-deobfuscation cleanup
+If the engine only produced anti-tamper probes, behavior traces, or incomplete output, label it as diagnostic / incomplete rather than recovered source.
 
-When this skill is integrated into a Discord deobfuscation bot or workflow, run Beautify automatically after a deobfuscation engine successfully produces Lua output and before sending the result to the user.
+## Luraph / anti-tamper handling
 
-1. Pass the completed deobfuscated Lua output through the Beautify workflow.
-2. Send the cleaned result as the normal Discord result, using the existing preview format where applicable.
-3. Attach the complete cleaned Lua file when the output is too large for a Discord message.
-4. If beautification fails, preserve and deliver the original deobfuscated output when possible, and clearly indicate that cleanup failed. Do not silently discard successful deobfuscation output.
-5. If the engine only produced a behavior trace, anti-tamper probes, or incomplete output, do not present it as a successfully recovered script.
-6. Keep this automatic cleanup optional for non-Discord integrations, and do not change the underlying deobfuscation engine or recovered script behavior.
+- Strip only explicit deobfuscator banners and known metadata comments.
+- Do not delete code merely because it mentions `Path2D`, `ScreenGui`, events, task scheduling, URLs, debugging, or Luraph.
+- Do not blindly remove script-owned integrity, licensing, authentication, or environment checks.
+- Treat version-specific generated preambles as a separate, evidence-based cleanup step. Stop at the first unknown statement; never skip over it and continue deleting later code.
+- Preserve the input if a cleanup step causes structural validation to worsen.
 
-This section describes the integration behavior. The bot or application must actually call the Beautify script/module; adding this instruction alone does not implement the integration.
+## Repository layout
 
-
-## Luraph bootstrap and anti-tamper cleanup
-
-Clean recognizable Luraph-generated probe scaffolding from the beginning of successfully recovered output. Use structure-aware matching rather than deleting an arbitrary number of lines.
-
-### Remove generated preamble
-
-- Look for the characteristic generated `Instance.new("Path2D")` probe near the beginning of the file. Treat it as a strong signature only when it appears as part of the expected preamble structure.
-- Starting at the first non-comment, non-blank statement, remove only the contiguous sequence of recognized generated probe statements.
-- Recognize generated `ScreenGui` / `Frame` creation and layout, `Path2D` setup and calls, `ScreenGui:Destroy()`, generated connection disconnects, numeric-name `Folder` setup and `WaitForChild` checks, empty event callbacks for common instance events, and empty `task.spawn` / `task.defer` / `task.delay` callbacks.
-- Stop at the first statement that does not match a known probe pattern. Never jump over an unknown statement and continue deleting later code.
-- Preserve service bindings from the removed preamble only when the remaining script actually references them.
-- Remove generated attribution, promotional links, status comments, support-ticket text, and debug-library notices when they are comments or other clearly non-functional boilerplate.
-- Do not delete code merely because it mentions `Path2D`, `ScreenGui`, events, task scheduling, debugging, URLs, or Luraph.
-
-### Handle anti-tamper probes carefully
-
-- Prefer explicit deobfuscator trap-attribution metadata when available. If a specific generated probe function is identified, remove only that probe from the final recovered source.
-- When testing a suspected trap, compare execution with and without that specific function. If skipping it causes the script to stop earlier, treat it as a possible script-owned crash, licensing, or integrity check and retain the original behavior.
-- Remove generated trace markers and probe-only annotations from the normal recovered-source output.
-- Do not blindly remove user-authored debug logic, integrity checks, licensing, authentication, or environment checks. Only remove code confidently identified as generated anti-tamper/environment probing.
-- If the output contains only probes, or execution failed before reaching the payload, label it as diagnostic/incomplete. Never present a probe trace as recovered source.
-
-### Keep version-specific cleanup distinct
-
-- For trace-style output, remove known generated markers and annotations, then trim the recognized preamble using the structural rules above.
-- For lifted source, run formatting and semantic cleanup separately. Validate the cleaned file with a Luau parser when available.
-- Keep a copy of the original output. If cleanup causes a syntax or structural validation failure, restore the original instead of delivering damaged code.
-- Do not assume a formatter alone removes the Luraph preamble or anti-tamper scaffolding.
+- `scripts/beautify.py`: CLI engine
+- `tests/test_beautify.py`: regression suite
+- `AI_PROMPT.md`: prompt for a deeper assisted rewrite
+- `rules/`: naming and strip guidance
+- `examples/`: before / after examples
