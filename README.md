@@ -8,10 +8,11 @@ The default engine is a token-based, scope-aware cleanup pass. It expands many s
 
 - Renames scoped locals, function parameters, and loop variables such as `v12`, `tbl4`, `Arg2`, `_l173`, and `fn3`.
 - Uses context from `GetService`, `LocalPlayer`, `WaitForChild`, `Instance.new`, event connections, and recognizable function bodies.
+- Reuses declared service aliases, so repeated `game:GetService("ReplicatedStorage")` chains become `ReplicatedStorage` when that local is in scope.
 - Infers a missing service alias only when a known Roblox service name is used as an otherwise-unbound identifier.
-- Splits semicolon chains and common inline control blocks.
+- Splits semicolon chains and common inline control blocks; normalizes binary operator spacing and separates top-level helper functions.
 - Removes only narrowly recognized deobfuscator banners and standalone pure-noise statements.
-- Reports unbalanced blocks rather than silently deleting unmatched `end` / `until` tokens.
+- Reports unbalanced blocks and unbound generated-looking names rather than silently deleting or guessing at them.
 
 ## CLI
 
@@ -32,7 +33,7 @@ Run the regression suite with:
 python3 -m unittest discover -s tests -v
 ```
 
-The tests cover shadowed locals, callback parameters, strings/comments, member names, inline blocks, missing service aliases, malformed input, and trace-only output.
+The tests cover shadowed locals, callback parameters, strings/comments, member names, inline blocks, service alias reuse, operator spacing, malformed input, and unresolved generated names.
 
 ## Limits
 
