@@ -584,7 +584,14 @@ def build_bindings(source: str, all_tokens: list[Token]):
                 _function_context,
             )
             if result is not None:
-                return result
+                ast_tokens, ast_bindings, ast_declarations, ast_scopes, ast_diagnostics = result
+                # The AST supplies scope structure; the token scanner remains a
+                # secondary guard for unmatched block markers in damaged output.
+                _, _, _, _, lexical_diagnostics = _build_bindings_lexical(source, all_tokens)
+                for item in lexical_diagnostics:
+                    if item.startswith(("unmatched ", "unclosed ")) and item not in ast_diagnostics:
+                        ast_diagnostics.append(item)
+                return ast_tokens, ast_bindings, ast_declarations, ast_scopes, ast_diagnostics
         except Exception as exc:
             # Parser/tooling errors must not prevent the conservative fallback from running.
             ast_error = f"Luau AST analysis unavailable for this file: {type(exc).__name__}"
@@ -1592,6 +1599,24 @@ def beautify(
     if unresolved_generated:
         diagnostics.append("unbound generated-looking identifiers retained: " + ", ".join(unresolved_generated))
 
+    ast_metadata = get_ast_report(source) if get_ast_report is not None else {
+        "ast_backend": "lexical-fallback",
+        "ast_syntax_errors": None,
+        "partial_functions": [],
+        "possible_missing_upvalues": [],
+        "scope_count": 0,
+    }
+    for candidate in ast_metadata.get("possible_missing_upvalues", []):
+        locations = ", ".join(str(line) for line in candidate.get("lines", []))
+        functions = ", ".join(candidate.get("functions", []))
+        diagnostics.append(
+            f"Possible missing upvalue or external global {candidate['name']!r}; "
+            f"referenced {candidate['occurrences']} time(s)"
+            + (f" in {functions}" if functions else "")
+            + (f" near line(s) {locations}" if locations else "")
+            + ". Definition was not invented."
+        )
+
     formatter_used = "fallback"
     formatter_warning = None
     if formatter in ("auto", "stylua"):
@@ -1647,6 +1672,11 @@ def beautify(
         "table_field_breaks": table_breaks,
         "expanded_tables": expanded_tables,
         "unresolved_generated_identifiers": unresolved_generated,
+        "ast_backend": ast_metadata.get("ast_backend", "lexical-fallback"),
+        "ast_syntax_errors": ast_metadata.get("ast_syntax_errors"),
+        "ast_scope_count": ast_metadata.get("scope_count", 0),
+        "partial_functions": ast_metadata.get("partial_functions", []),
+        "possible_missing_upvalues": ast_metadata.get("possible_missing_upvalues", []),
         "diagnostics": diagnostics,
         "remaining_garbage": remaining_garbage,
         "formatter_used": formatter_used,
