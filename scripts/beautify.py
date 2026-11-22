@@ -657,17 +657,30 @@ def infer_semantic_function_name(binding: Binding) -> str | None:
     return None
 
 
+
+def binding_usage_context(binding: Binding, tokens: list[Token], radius: int = 7) -> str:
+    """Collect token neighborhoods around this binding's actual references."""
+    chunks = []
+    for reference in binding.refs:
+        start = max(0, reference - radius)
+        end = min(len(tokens), reference + radius + 1)
+        chunks.append(" ".join(token.value for token in tokens[start:end]))
+    return " ".join(chunks)
+
 def infer_semantic_value_name(
     binding: Binding,
     initializer: str,
     assignment_context: str,
     local_context: str,
     function_context: str = "",
+    usage_context: str = "",
 ) -> str | None:
-    """Infer names for temporaries from constructors, fields, callbacks, and uses."""
-    combined = " ".join((initializer, assignment_context, local_context, function_context))
+    """Infer names from the binding's own initializer, assignments, and reference sites."""
+    combined = " ".join((initializer, assignment_context, local_context, usage_context))
     low = combined.lower()
     init_low = initializer.lower()
+    assignment_low = assignment_context.lower()
+    usage_low = usage_context.lower()
     function_low = function_context.lower()
     function_compact = re.sub(r"\s+", "", function_low)
 
@@ -690,21 +703,21 @@ def infer_semantic_value_name(
         if f'instance.new("{class_name}")' in init_low or f"instance.new('{class_name}')" in init_low:
             return variable_name
 
-    if "raiddefinitions[" in init_low or ("raiddefinitions" in low and ("bossname" in low or "npcname" in low)):
+    if "raiddefinitions[" in init_low or "raiddefinitions[" in assignment_low or "raiddefinitions[" in usage_low:
         return "raidDefinition"
     if "statamountinput" in low or ("upgrade" in low and "stat" in low and "amount" in low):
         return "statUpgradeAmount"
-    if "autostoryline" in low and "task.spawn" in low:
+    if "autostoryline" in (init_low + " " + assignment_low) and "task.spawn" in (init_low + " " + assignment_low):
         return "storylineTask"
-    if "automission" in low and "task.spawn" in low:
+    if "automission" in (init_low + " " + assignment_low) and "task.spawn" in (init_low + " " + assignment_low):
         return "missionTask"
-    if "automeditation" in low and "task.spawn" in low:
+    if "automeditation" in (init_low + " " + assignment_low) and "task.spawn" in (init_low + " " + assignment_low):
         return "meditationTask"
-    if "autofarmplayer" in low and "task.spawn" in low:
+    if "autofarmplayer" in (init_low + " " + assignment_low) and "task.spawn" in (init_low + " " + assignment_low):
         return "playerFarmTask"
-    if "autoraid" in low and "task.spawn" in low:
+    if "autoraid" in (init_low + " " + assignment_low) and "task.spawn" in (init_low + " " + assignment_low):
         return "raidTask"
-    if "autoskill" in low and "task.spawn" in low:
+    if "autoskill" in (init_low + " " + assignment_low) and "task.spawn" in (init_low + " " + assignment_low):
         return "skillTask"
     if "bodyvelocity" in low:
         return "bodyVelocity"
@@ -734,26 +747,26 @@ def infer_semantic_value_name(
         return "isHovered"
 
     # Infer the object type from the properties used in this binding's context.
-    if ".health" in low and (".walkspeed" in low or ".jumppower" in low):
+    if any(member in usage_low for member in (".health", ".walkspeed", ".jumppower")):
         return "humanoid"
-    if ".userid" in low and ".character" in low:
+    if ".userid" in usage_low or (".character" in usage_low and ".name" in usage_low):
         return "player"
-    if ".cframe" in low and (".position" in low or "humanoidrootpart" in low):
+    if ".cframe" in usage_low or ".position" in usage_low or "humanoidrootpart" in usage_low:
         return "rootPart"
-    if ".name" in low and ("getplayers" in low or "player" in low):
+    if ".name" in usage_low and ("players" in low or "player" in usage_low):
         return "playerName"
-    if "findfirstchild" in low and "humanoidrootpart" in low:
+    if "findfirstchild" in usage_low and "humanoidrootpart" in usage_low:
         return "character"
 
     # A fallback variable name should be specific only when the use is clear.
     if binding.role == "parameter":
-        if ".userid" in low or ".character" in low and ".name" in low:
+        if ".userid" in usage_low or (".character" in usage_low and ".name" in usage_low):
             return "player"
-        if ".health" in low or ".walkspeed" in low or ".jumppower" in low:
+        if ".health" in usage_low or ".walkspeed" in usage_low or ".jumppower" in usage_low:
             return "humanoid"
-        if ".keycode" in low or ".userinputtype" in low:
+        if ".keycode" in usage_low or ".userinputtype" in usage_low:
             return "input"
-        if ".name" in low and "live" in low:
+        if ".name" in usage_low and "live" in function_low:
             return "targetName"
     return None
 
@@ -956,12 +969,14 @@ def infer_binding_names(source: str, tokens: list[Token], bindings: list[Binding
             function_context = " ".join(
                 token.value for token in tokens[b.scope.function_token:b.scope.function_end + 1]
             )
+        usage_context = binding_usage_context(b, tokens)
         semantic_value_name = infer_semantic_value_name(
             b,
             init,
             assignment_context,
             local_context,
             function_context,
+            usage_context,
         )
         if semantic_value_name:
             hint = semantic_value_name
