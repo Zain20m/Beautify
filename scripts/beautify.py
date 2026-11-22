@@ -1577,6 +1577,8 @@ def beautify(
     source, removed_junk = strip_pure_junk(source, return_count=True)
 
     rename_stats: dict[str, int] = {}
+    bindings: list[Binding] = []
+    semantic_name_decisions: list[dict] = []
     diagnostics: list[str] = []
     inferred_services: list[str] = []
     canonicalized_service_calls = 0
@@ -1594,6 +1596,16 @@ def beautify(
                     binding.hint = "value"
             source, rename_stats = rename_bindings(source, tokens, bindings, decl_tokens)
         source, canonicalized_service_calls = canonicalize_service_calls(source)
+        semantic_name_decisions = [
+            {
+                "original": binding.name,
+                "suggested": binding.new_name,
+                "confidence": binding.inference_confidence,
+                "evidence": binding.name_evidence,
+            }
+            for binding in bindings
+            if binding.new_name and binding.name_evidence
+        ]
 
     unresolved_generated = find_unresolved_generated_identifiers(source)
     if unresolved_generated:
@@ -1606,6 +1618,10 @@ def beautify(
         "possible_missing_upvalues": [],
         "scope_count": 0,
     }
+    for marker in ast_metadata.get("devirtualization_markers", []):
+        diagnostics.append(
+            f"Unresolved devirtualization marker at line {marker['line']}: {marker['text']}"
+        )
     for candidate in ast_metadata.get("possible_missing_upvalues", []):
         locations = ", ".join(str(line) for line in candidate.get("lines", []))
         functions = ", ".join(candidate.get("functions", []))
@@ -1677,6 +1693,8 @@ def beautify(
         "ast_scope_count": ast_metadata.get("scope_count", 0),
         "partial_functions": ast_metadata.get("partial_functions", []),
         "possible_missing_upvalues": ast_metadata.get("possible_missing_upvalues", []),
+        "devirtualization_markers": ast_metadata.get("devirtualization_markers", []),
+        "semantic_name_decisions": semantic_name_decisions,
         "diagnostics": diagnostics,
         "remaining_garbage": remaining_garbage,
         "formatter_used": formatter_used,
