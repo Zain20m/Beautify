@@ -1000,9 +1000,11 @@ def rename_bindings(source: str, tokens: list[Token], bindings: list[Binding], d
             "handleEvent": "eventHandler",
             "sendRemoteEvent": "remoteEventHandler",
             "isFeatureEnabled": "featureEnabledFlag",
-            "eventConnection": "connection",
+            "eventConnection": "localConnection",
         }
         base = safe_bases.get(base, base)
+        if is_weak_identifier(base):
+            base = "local" + base[:1].upper() + base[1:]
         candidate = base
         suffix = 2
         while candidate in used or is_weak_identifier(candidate):
