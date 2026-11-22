@@ -169,6 +169,8 @@ def _node_features(function_node, raw: bytes) -> dict[str, list[str]]:
     stack = [function_node]
     while stack:
         node = stack.pop()
+        if node is not function_node and node.type in ("function_declaration", "function_definition"):
+            continue
         if node.type == "function_call":
             calls.append(_text(node.child_by_field_name("name"), raw))
         elif node.type == "dot_index_expression":
@@ -322,8 +324,27 @@ def build_ast_bindings(source: str, all_tokens: list, binding_type, scope_type, 
             return
         if node_type == "variable_declaration":
             variable_list = _find_descendant(node, "variable_list")
+            local_bindings = []
             if variable_list is not None:
-                add_variable_list(variable_list, scope, char_pos(node.end_byte), "local")
+                for name_node in _field_children(variable_list, "name"):
+                    binding = add_binding(name_node, scope, "local", char_pos(node.end_byte))
+                    if binding is not None:
+                        local_bindings.append(binding)
+
+            # A local assigned directly to an anonymous function gets that function's
+            # AST facts, so semantic naming can describe the helper on later passes.
+            assignment = _find_descendant(node, "assignment_statement")
+            expression_list = _find_descendant(assignment, "expression_list") if assignment is not None else None
+            if expression_list is not None:
+                values = list(expression_list.named_children)
+                for binding, value in zip(local_bindings, values):
+                    if value.type == "function_definition":
+                        body = value.child_by_field_name("body")
+                        binding.function_body = _text(body, raw)
+                        binding.ast_features = _node_features(value, raw)
+                        function_index = token_index(value)
+                        binding.function_context = function_context(tokens, function_index) if function_index is not None else ""
+
             for child in node.named_children:
                 if child is not variable_list:
                     visit(child, scope)
