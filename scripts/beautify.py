@@ -584,10 +584,11 @@ def _function_context(tokens: list[Token], index: int) -> str:
 def infer_semantic_function_name(binding: Binding) -> str | None:
     """Name a helper from its body, not its decompiler-generated label."""
     body = re.sub(r"\s+", " ", binding.function_body).lower()
+    compact = re.sub(r"\s+", "", body)
     if not body:
         return None
 
-    has = lambda *needles: all(needle in body for needle in needles)
+    has = lambda *needles: all(needle.replace(" ", "") in compact for needle in needles)
 
     # Character movement and lifecycle.
     if has("bodyvelocity", "bodygyro"):
@@ -624,7 +625,7 @@ def infer_semantic_function_name(binding: Binding) -> str | None:
         return "isTrackedQuestComplete"
     if has("trackquest", "fireserver"):
         return "setTrackedQuest"
-    if "teleportservice" in body and ":teleport(" in body:
+    if "teleportservice" in compact and "teleport(" in compact:
         return "teleportToHub"
     if "stand arrow" in body and "fireproximityprompt" in body:
         return "collectStandArrow"
@@ -634,19 +635,19 @@ def infer_semantic_function_name(binding: Binding) -> str | None:
         return "autoUseChestItems"
     if "raiddefinitions" in body and "table.insert" in body:
         return "getRaidNames"
-    if "autoraid" in body and "task.spawn" in body:
+    if "autoraid" in compact and "task.spawn" in compact:
         return "startAutoRaid"
-    if "autoraid" in body and "task.cancel" in body:
+    if "autoraid" in compact and "task.cancel" in compact:
         return "stopAutoRaid"
-    if "autostoryline" in body and "task.spawn" in body:
+    if "autostoryline" in compact and "task.spawn" in compact:
         return "startAutoStoryline"
-    if "autoskill" in body and "task.spawn" in body:
+    if "autoskill" in compact and "task.spawn" in compact:
         return "runAutoSkills"
     if "joined pvp mission queue" in body or "mission complete" in body:
         return "isPvpMissionQueued"
-    if "notifications" in body and "descendantadded" in body and "pvp" in body:
+    if "notifications" in compact and "descendantadded" in compact and "pvp" in body:
         return "watchPvpQueueNotifications"
-    if "getgenv" in body and "autofarmplayer" in body and "task.spawn" in body:
+    if "getgenv" in compact and "autofarmplayer" in compact and "task.spawn" in compact:
         return "startPlayerFarm"
     if "proximityprompt" in body and "fireproximityprompt" in body and "getdescendants" in body:
         return "activateNpcPrompts"
@@ -686,7 +687,7 @@ def infer_semantic_value_name(
         if f'instance.new("{class_name}")' in init_low or f"instance.new('{class_name}')" in init_low:
             return variable_name
 
-    if "raiddefinitions" in low and ("bossname" in low or "npcname" in low):
+    if "raiddefinitions[" in init_low or ("raiddefinitions" in low and ("bossname" in low or "npcname" in low)):
         return "raidDefinition"
     if "statamountinput" in low or ("upgrade" in low and "stat" in low and "amount" in low):
         return "statUpgradeAmount"
