@@ -97,13 +97,12 @@ def _field_is(node, child, field_name: str) -> bool:
     return False
 
 
-def _is_local_function(node) -> bool:
+def _is_local_function(node, raw: bytes) -> bool:
     parent = node.parent
-    return (
-        parent is not None
-        and parent.type == "declaration"
-        and _field_is(parent, node, "local_declaration")
-    )
+    if parent is None or parent.type != "declaration":
+        return False
+    declaration_text = _text(parent, raw).lstrip()
+    return bool(re.match(r"^local\\s+function\\b", declaration_text))
 
 
 def _inside_type(node) -> bool:
@@ -249,7 +248,7 @@ def build_ast_bindings(source: str, all_tokens: list, binding_type, scope_type, 
                 visit(child, scope)
 
     def visit_function(node, scope):
-        local_function = node.type == "function_declaration" and _is_local_function(node)
+        local_function = node.type == "function_declaration" and _is_local_function(node, raw)
         name_node = node.child_by_field_name("name")
         if local_function and name_node is not None and name_node.type == "identifier":
             add_binding(name_node, scope, "local", char_pos(name_node.start_byte), node)
@@ -275,7 +274,11 @@ def build_ast_bindings(source: str, all_tokens: list, binding_type, scope_type, 
 
         fn_index = token_index(node)
         function_scope.function_token = fn_index
-        function_scope.function_end = token_index(node)
+        function_end_char = char_pos(node.end_byte)
+        function_scope.function_end = max(
+            (index for index, token in enumerate(tokens) if token.end <= function_end_char),
+            default=fn_index or 0,
+        )
         function_scope.function_context = function_context(tokens, fn_index) if fn_index is not None else ""
         visit_block_contents(body, function_scope)
 
