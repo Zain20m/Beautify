@@ -903,7 +903,7 @@ def indent_source(source: str) -> str:
         leading, delta = _line_block_delta(text)
         toks = lex(text)
         symbols = [t.value for t in toks if t.kind == "punct"]
-        closes_table = 1 if symbols and symbols[0] == "}" else 0
+        closes_table = 1 if text.startswith("}") else 0
         chain_indent = 1 if text.startswith((".", ":")) else 0
         out.append("    " * max(0, depth - leading + table_depth - closes_table + chain_indent) + text)
         depth = max(0, depth + delta)
@@ -1027,6 +1027,50 @@ def split_chained_calls(source: str, indent_width: int = 4) -> tuple[str, int]:
         source = source[:position] + text + source[position:]
     return source, len(insertions)
 
+
+
+def expand_multiline_tables(source: str) -> tuple[str, int]:
+    """Expand table constructors with multiple fields/items onto readable lines."""
+    tokens = significant(lex(source))
+    paren_depth = bracket_depth = 0
+    stack: list[dict[str, int | bool]] = []
+    insertions: list[tuple[int, str]] = []
+    expanded = 0
+    for token in tokens:
+        value = token.value
+        if value == "(":
+            paren_depth += 1
+        elif value == ")":
+            paren_depth = max(0, paren_depth - 1)
+        elif value == "[":
+            bracket_depth += 1
+        elif value == "]":
+            bracket_depth = max(0, bracket_depth - 1)
+        elif value == "{":
+            stack.append({
+                "start": token.start,
+                "end": token.end,
+                "paren": paren_depth,
+                "bracket": bracket_depth,
+                "has_comma": False,
+            })
+        elif value == "," and stack:
+            current = stack[-1]
+            if paren_depth == current["paren"] and bracket_depth == current["bracket"]:
+                current["has_comma"] = True
+        elif value == "}" and stack:
+            table = stack.pop()
+            if table["has_comma"]:
+                opening_end = int(table["end"])
+                if source[opening_end:token.start].strip() and "\n" not in source[opening_end:token.start]:
+                    insertions.append((opening_end, "\n"))
+                before_close = source[:token.start].rsplit("\n", 1)[-1]
+                if before_close.strip() and not before_close.strip().startswith("--"):
+                    insertions.append((token.start, "\n"))
+                expanded += 1
+    for position, value in reversed(insertions):
+        source = source[:position] + value + source[position:]
+    return source, expanded
 
 def split_table_fields(source: str) -> tuple[str, int]:
     """Move table fields onto separate lines while leaving call-argument commas alone."""
@@ -1177,6 +1221,7 @@ def beautify(
     chain_breaks = 0
     table_breaks = 0
     if formatter_used == "fallback":
+        source, expanded_tables = expand_multiline_tables(source)
         source, table_breaks = split_table_fields(source)
         source, chain_breaks = split_chained_calls(source)
         source = indent_source(source)
@@ -1206,6 +1251,7 @@ def beautify(
         "canonicalized_service_calls": canonicalized_service_calls,
         "chain_breaks": chain_breaks,
         "table_field_breaks": table_breaks,
+        "expanded_tables": expanded_tables,
         "unresolved_generated_identifiers": unresolved_generated,
         "diagnostics": diagnostics,
         "remaining_garbage": remaining_garbage,
