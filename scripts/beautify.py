@@ -25,9 +25,11 @@ BANNER_RE = re.compile(
     r"Beautified from deobfuscator|NOT SOURCE:|={5,}).*$", re.I
 )
 PURE_STMT_RE = re.compile(
-    r"^\s*(?:bit32\.\w+\s*\([^;]*\)|"
-    r"(?:type|typeof|tostring|tonumber)\s*\(\s*(?:\d+|true|false|nil|\"[^\"]*\"|'[^']*')\s*\)|"
-    r"table\.pack\s*\([^;]*\))\s*;?\s*$"
+    r"^\s*(?:"
+    r"bit32\.\w+\s*\(\s*-?\d+(?:\s*,\s*-?\d+){0,2}\s*\)|"
+    r"(?:type|typeof|tostring|tonumber)\s*\(\s*(?:-?\d+(?:\.\d+)?|true|false|nil|\"[^\"]*\"|'[^']*')\s*\)|"
+    r"table\.pack\s*\(\s*(?:-?\d+(?:\.\d+)?|true|false|nil|\"[^\"]*\"|'[^']*')(?:\s*,\s*(?:-?\d+(?:\.\d+)?|true|false|nil|\"[^\"]*\"|'[^']*'))*\s*\)"
+    r")\s*;?\s*$"
 )
 EMPTY_DO_RE = re.compile(r"^\s*do\s*end\s*;?\s*$")
 
@@ -38,8 +40,14 @@ GARBAGE_IDENT = re.compile(
     r"t\d+|T\d+|t_\d+|T_\d+|f\d+|F\d+|fn\d+|FN\d+|tbl\d*|Tbl\d*|"
     r"arg|Arg\d+|arg\d+|ARG\d+|var_\d+|_l\d+|L_\d+|[A-Z]_\d+|loc\d+|"
     r"PROTO_\d+|STACK\d*|REGISTER\d*|R\d+|n\d*|flag\d*|thread\d*|"
-    r"connection\d*|lib\d*|tween\d*|paragraph\d*|cFrame)$"
+    r"connection\d*|lib\d*|tween\d*|paragraph\d*|cFrame|"
+    r"handleEvent\d*|sendRemoteEvent\d*|value\d+|numericValue\d+|"
+    r"remoteArgument\d+|argument\d+|eventConnection\d*|isFeatureEnabled\d*)$"
 )
+
+def is_weak_identifier(name: str) -> bool:
+    return GARBAGE_IDENT.fullmatch(name) is not None
+
 
 KEYWORDS = {
     "and", "break", "continue", "do", "else", "elseif", "end", "false",
@@ -115,7 +123,6 @@ class Block:
     kind: str
     parent_scope: Scope
     scope: Scope | None = None
-    header_start: int = -1
     loop_names: list[tuple[str, int]] = field(default_factory=list)
 
 
@@ -573,11 +580,187 @@ def _function_context(tokens: list[Token], index: int) -> str:
     return ""
 
 
+
+def infer_semantic_function_name(binding: Binding) -> str | None:
+    """Name a helper from its body, not its decompiler-generated label."""
+    body = re.sub(r"\s+", " ", binding.function_body).lower()
+    if not body:
+        return None
+
+    has = lambda *needles: all(needle in body for needle in needles)
+
+    # Character movement and lifecycle.
+    if has("bodyvelocity", "bodygyro"):
+        if "destroy" in body or "disconnect" in body or "isflightenabled = false" in body:
+            return "stopFlight"
+        return "startFlight"
+    if has("meditation") and ("yogamat" in body or "workspace" in body):
+        return "runMeditationRoutine"
+    if has("workout") and ("fireserver" in body or "findfirstchild" in body):
+        return "interactWithWorkout"
+    if has("characteradded", "humanoidrootpart", "wait"):
+        return "refreshCharacterReferences"
+
+    # Players, targets, camera, and world entities.
+    if has("getplayers", "magnitude", ".name"):
+        return "findNearestOpponentName"
+    if has("getplayers", "table.insert", ".name"):
+        return "getPlayerNames"
+    if has("getchildren", "string.sub", ".name") and "live" in body:
+        return "findLiveEntityByPrefix"
+    if ("currentcamera" in body or "camerasubject" in body) and ("targetplayer" in body or "live" in body):
+        return "spectateTargetPlayer"
+    if has("lookvector", "humanoidrootpart", "cframe") and ("targetname" in body or "targetcharacter" in body):
+        return "teleportBehindTarget"
+    if has("findfirstchildofclass", "humanoid", ".health") and "return" in body:
+        return "isCharacterAlive"
+
+    # Quest, mission, raid, and game UI flows.
+    if has("farmquestconfig") and ("autostoryline" in body or "getgenv" in body):
+        return "runTrackedQuestConfig"
+    if has("automationchecks", "pairs") and "return" in body:
+        return "hasActiveAutomation"
+    if has("trackedquest", "farmquest") and "return" in body:
+        return "isTrackedQuestComplete"
+    if has("trackquest", "fireserver"):
+        return "setTrackedQuest"
+    if "teleportservice" in body and ":teleport(" in body:
+        return "teleportToHub"
+    if "stand arrow" in body and "fireproximityprompt" in body:
+        return "collectStandArrow"
+    if "stand arrow" in body and ("fireserver" in body or "invokeserver" in body):
+        return "autoRollStandArrow"
+    if "chest" in body and ("fireserver" in body or "invokeserver" in body):
+        return "autoUseChestItems"
+    if "raiddefinitions" in body and "table.insert" in body:
+        return "getRaidNames"
+    if "autoraid" in body and "task.spawn" in body:
+        return "startAutoRaid"
+    if "autoraid" in body and "task.cancel" in body:
+        return "stopAutoRaid"
+    if "autostoryline" in body and "task.spawn" in body:
+        return "startAutoStoryline"
+    if "autoskill" in body and "task.spawn" in body:
+        return "runAutoSkills"
+    if "joined pvp mission queue" in body or "mission complete" in body:
+        return "isPvpMissionQueued"
+    if "notifications" in body and "descendantadded" in body and "pvp" in body:
+        return "watchPvpQueueNotifications"
+    if "getgenv" in body and "autofarmplayer" in body and "task.spawn" in body:
+        return "startPlayerFarm"
+    if "proximityprompt" in body and "fireproximityprompt" in body and "getdescendants" in body:
+        return "activateNpcPrompts"
+    if "questbrick" in body and "cframe" in body and "effects" in body:
+        return "processQuestEffects"
+
+    return None
+
+
+def infer_semantic_value_name(
+    binding: Binding,
+    initializer: str,
+    assignment_context: str,
+    local_context: str,
+) -> str | None:
+    """Infer names for temporaries from constructors, fields, and their uses."""
+    combined = " ".join((initializer, assignment_context, local_context))
+    low = combined.lower()
+    init_low = initializer.lower()
+
+    # Concrete Roblox instance constructors and returned engine objects.
+    constructor_names = {
+        "bodyvelocity": "bodyVelocity",
+        "bodygyro": "bodyGyro",
+        "bodyposition": "bodyPosition",
+        "bodymover": "bodyMover",
+        "screen gui": "screenGui",
+        "textbutton": "textButton",
+        "textlabel": "textLabel",
+        "uicorner": "uiCorner",
+        "uistroke": "uiStroke",
+        "proximityprompt": "proximityPrompt",
+        "billboardgui": "billboardGui",
+        "highlight": "highlight",
+    }
+    for class_name, variable_name in constructor_names.items():
+        if f'instance.new("{class_name}")' in init_low or f"instance.new('{class_name}')" in init_low:
+            return variable_name
+
+    if "raiddefinitions" in low and ("bossname" in low or "npcname" in low):
+        return "raidDefinition"
+    if "statamountinput" in low or ("upgrade" in low and "stat" in low and "amount" in low):
+        return "statUpgradeAmount"
+    if "autostoryline" in low and "task.spawn" in low:
+        return "storylineTask"
+    if "automission" in low and "task.spawn" in low:
+        return "missionTask"
+    if "automeditation" in low and "task.spawn" in low:
+        return "meditationTask"
+    if "autofarmplayer" in low and "task.spawn" in low:
+        return "playerFarmTask"
+    if "autoraid" in low and "task.spawn" in low:
+        return "raidTask"
+    if "autoskill" in low and "task.spawn" in low:
+        return "skillTask"
+    if "bodyvelocity" in low:
+        return "bodyVelocity"
+    if "bodygyro" in low:
+        return "bodyGyro"
+    if "humanoidrootpart" in init_low and ("findfirstchild" in init_low or "waitforchild" in init_low):
+        return "rootPart"
+    if "findfirstchildofclass" in init_low and "humanoid" in init_low:
+        return "humanoid"
+    if "magnitude" in low and "position" in low:
+        return "distance"
+    if "farmquestconfig" in low:
+        return "questHandler"
+    if "automationchecks" in low:
+        return "automationCheck"
+    if "targetplayer.value" in low:
+        return "targetPlayerName"
+    if "selectedchest.value" in low:
+        return "selectedChestName"
+    if "selectedraid.value" in low:
+        return "selectedRaidName"
+    if "selectedworkouts.value" in low:
+        return "selectedWorkoutName"
+
+    # Infer the object type from the properties the binding is read through.
+    refs = binding.refs
+    if refs:
+        properties = {
+            tokens_value
+            for ref in refs
+            for tokens_value in ()
+        }
+    if ".health" in low and (".walkspeed" in low or ".jumppower" in low):
+        return "humanoid"
+    if ".userid" in low and ".character" in low:
+        return "player"
+    if ".cframe" in low and (".position" in low or "humanoidrootpart" in low):
+        return "rootPart"
+    if ".name" in low and ("getplayers" in low or "player" in low):
+        return "playerName"
+    if "findfirstchild" in low and "humanoidrootpart" in low:
+        return "character"
+
+    # A fallback variable name should be specific only when the use is clear.
+    if binding.role == "parameter":
+        if ".userid" in low or ".character" in low and ".name" in low:
+            return "player"
+        if ".health" in low or ".walkspeed" in low or ".jumppower" in low:
+            return "humanoid"
+        if ".keycode" in low or ".userinputtype" in low:
+            return "input"
+        if ".name" in low and "live" in low:
+            return "targetName"
+    return None
+
 def infer_binding_names(source: str, tokens: list[Token], bindings: list[Binding], decl_tokens: dict[int, Binding]) -> None:
     """Use initialization, member access, and callback context for conservative names."""
     value_tokens = [t.value for t in tokens]
     for b in bindings:
-        if not GARBAGE_IDENT.fullmatch(b.name):
+        if not is_weak_identifier(b.name):
             continue
         i = b.token_index
         init = ""
@@ -712,7 +895,7 @@ def infer_binding_names(source: str, tokens: list[Token], bindings: list[Binding
         if b.name == "n2" or "StatAmountInput" in assignment_context + local_context: hint = "statUpgradeAmount"
         if b.name.lower() == "cframe": hint = "savedCFrame"
 
-        if b.role == "local" and re.fullmatch(r"(?:fn\d+|f\d+|_l\d+|tween\d*)", b.name, re.I):
+        if b.role == "local" and re.fullmatch(r"(?:fn\d+|f\d+|_l\d+|tween\d*|handleEvent\d*|sendRemoteEvent\d*)", b.name, re.I):
             body_context = b.function_body or " ".join(value_tokens[i:min(len(tokens), i + 35)])
             body_low = body_context.lower()
             if "tweenservice" in body_low or ("color3" in body_low and "backgroundcolor3" in body_low):
@@ -761,6 +944,21 @@ def infer_binding_names(source: str, tokens: list[Token], bindings: list[Binding
             hint = "numericValue"
         if b.name.lower().startswith("lib") and hint in (None, "value"):
             hint = "library"
+
+        if b.role == "local" and b.function_body:
+            semantic_function_name = infer_semantic_function_name(b)
+            if semantic_function_name:
+                hint = semantic_function_name
+
+        semantic_value_name = infer_semantic_value_name(
+            b,
+            init,
+            assignment_context,
+            local_context,
+        )
+        if semantic_value_name:
+            hint = semantic_value_name
+
         b.hint = hint or "value"
 
 
@@ -795,8 +993,67 @@ def strip_banners(source: str) -> str:
     return "\n".join(line for line in source.splitlines() if not BANNER_RE.match(line))
 
 
+def _is_pure_literal(tokens: list[Token]) -> bool:
+    """Accept only literal scalar values or literal-only table constructors."""
+    if not tokens:
+        return False
+    allowed = {"{", "}", "[", "]", "=", ",", "-", "true", "false", "nil"}
+    if not all(token.kind in ("number", "string") or token.value in allowed or token.kind == "ident" for token in tokens):
+        return False
+    for index, token in enumerate(tokens):
+        if token.kind == "ident":
+            # Identifiers are allowed only as plain record keys, never as values.
+            if index + 1 >= len(tokens) or tokens[index + 1].value != "=":
+                return False
+        if token.value in (".", ":", "(", ")", "function"):
+            return False
+    return tokens[0].kind in ("number", "string") or tokens[0].value in ("true", "false", "nil", "{", "-")
+
+
+def strip_unused_generated_literals(source: str) -> tuple[str, int]:
+    """Remove only unused generated locals initialized with inert literals."""
+    tokens, bindings, _, _, _ = build_bindings(source, lex(source))
+    removals: list[tuple[int, int]] = []
+    for binding in bindings:
+        if binding.role != "local" or binding.refs or not is_weak_identifier(binding.name):
+            continue
+        index = binding.token_index
+        line_start = source.rfind("\n", 0, tokens[index].start) + 1
+        line_end = source.find("\n", tokens[index].end)
+        if line_end < 0:
+            line_end = len(source)
+        line = source[line_start:line_end]
+        if "--" in line:
+            continue
+        # Only a single local binding on its own line is eligible.
+        if not re.match(r"^\s*local\s+" + re.escape(binding.name) + r"\s*=", line):
+            continue
+        name_indices, lhs_end, local_function = _parse_local_names(tokens, index - 1 if index > 0 and tokens[index - 1].value == "local" else index)
+        if local_function or len(name_indices) != 1:
+            continue
+        equals = next((i for i in range(binding.token_index + 1, len(tokens)) if tokens[i].line == tokens[binding.token_index].line and tokens[i].value == "="), None)
+        if equals is None:
+            continue
+        end = _statement_end(tokens, equals + 1)
+        expr = tokens[equals + 1:end]
+        if end < len(tokens) and tokens[end].line == tokens[equals].line:
+            continue
+        if _is_pure_literal(expr):
+            removals.append((line_start, min(len(source), line_end + (1 if line_end < len(source) else 0))))
+    for start, end in sorted(removals, reverse=True):
+        source = source[:start] + source[end:]
+    return source, len(removals)
+
+
 def strip_pure_junk(source: str) -> str:
-    return "\n".join(line for line in source.splitlines() if not PURE_STMT_RE.match(line) and not EMPTY_DO_RE.match(line))
+    """Remove only explicit banners, no-op padding, and standalone pure constants."""
+    kept = [
+        line for line in source.splitlines()
+        if not PURE_STMT_RE.match(line) and not EMPTY_DO_RE.match(line)
+    ]
+    source = "\n".join(kept)
+    source, _ = strip_unused_generated_literals(source)
+    return source
 
 
 def split_semicolons(source: str) -> str:
@@ -1191,7 +1448,7 @@ def beautify(
             source, rename_stats = rename_bindings(source, tokens, bindings, decl_tokens)
         else:
             for binding in bindings:
-                if GARBAGE_IDENT.fullmatch(binding.name):
+                if is_weak_identifier(binding.name):
                     binding.hint = "value"
             source, rename_stats = rename_bindings(source, tokens, bindings, decl_tokens)
         source, canonicalized_service_calls = canonicalize_service_calls(source)
