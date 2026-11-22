@@ -962,12 +962,22 @@ def rename_bindings(source: str, tokens: list[Token], bindings: list[Binding], d
     renamed: dict[str, int] = {}
     replacements: list[tuple[int, int, str]] = []
     for b in bindings:
-        if not GARBAGE_IDENT.fullmatch(b.name):
+        if not is_weak_identifier(b.name):
             continue
         base = b.hint or "value"
+        # Never emit another name that the weak-name detector would flag.
+        safe_bases = {
+            "value": "localValue",
+            "numericValue": "numberValue",
+            "handleEvent": "eventHandler",
+            "sendRemoteEvent": "remoteEventHandler",
+            "isFeatureEnabled": "featureEnabledFlag",
+            "eventConnection": "connection",
+        }
+        base = safe_bases.get(base, base)
         candidate = base
         suffix = 2
-        while candidate in used:
+        while candidate in used or is_weak_identifier(candidate):
             candidate = f"{base}{suffix}"
             suffix += 1
         b.new_name = candidate
