@@ -97,14 +97,6 @@ def _field_is(node, child, field_name: str) -> bool:
     return False
 
 
-def _is_local_function(node, raw: bytes) -> bool:
-    parent = node.parent
-    if parent is None or parent.type != "declaration":
-        return False
-    declaration_text = _text(parent, raw).lstrip()
-    return bool(re.match(r"^local\s+function\b", declaration_text))
-
-
 def _inside_type(node) -> bool:
     current = node.parent
     while current is not None:
