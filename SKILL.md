@@ -3,7 +3,7 @@ name: beautify
 description: Clean already-deobfuscated Roblox Luau using scope-aware renaming, conservative junk removal, formatting, and structural diagnostics.
 license: MIT
 metadata:
-  version: "3.1"
+  version: "4.0"
   focus: roblox-luau-deobf-cleanup
 ---
 
@@ -22,11 +22,19 @@ Do not present a probe-only trace as recovered source.
 
 ## Workflow
 
-Run the mechanical beautifier first:
+Run the beautifier:
 
 ```bash
-python3 scripts/beautify.py input.lua -o clean.lua --report
+python3 scripts/beautify.py input.lua -o clean.lua --report --formatter auto
 ```
+
+Install StyLua for complete Luau AST formatting:
+
+```bash
+pip install git+https://github.com/JohnnyMorganz/StyLua@v2.6.0
+```
+
+Use `--formatter stylua` to require syntax-aware formatting, `--formatter auto` to use StyLua when available and safely fall back for malformed input, or `--formatter fallback` to force the built-in formatter.
 
 Then inspect the report and output. Keep the original deobfuscator output unchanged as a fallback.
 
@@ -37,11 +45,13 @@ Then inspect the report and output. Keep the original deobfuscator output unchan
 3. Renames generated identifiers by binding, so shadowed variables are not globally replaced together.
 4. Uses nearby API and function context to suggest names such as `Players`, `localPlayer`, `humanoid`, `rootPart`, `inputBeganConn`, or `activateNpcPrompts`.
 5. Infers known Roblox service aliases only when a bare service identifier is otherwise unbound, then reuses any in-scope service local instead of repeating `game:GetService(...)` calls.
-6. Expands semicolon chains and common inline blocks, normalizes binary operator spacing, and separates top-level helper functions.
-7. Removes only narrowly recognized tool banners, pure constant-expression noise, and empty `do end` padding.
-8. Reports unmatched `end` / `until` tokens and unbound generated-looking identifiers. Unbound names are not renamed automatically because they may be globals or missing devirtualized upvalues.
+6. Runs StyLua's Luau parser/printer over the complete file when available, formatting statements, expressions, tables, callbacks, control flow, operators, and chains.
+7. Enforces a readable one-call-per-line method-chain layout and consistent blank lines.
+8. Uses the fallback token formatter when source is incomplete or cannot be parsed. The fallback expands many semicolon chains and inline blocks, formats table fields and method chains, and reports that it could not perform AST formatting.
+9. Removes only narrowly recognized tool banners, pure constant-expression noise, and empty `do end` padding.
+10. Reports unmatched `end` / `until` tokens and unbound generated-looking identifiers. Unbound names are not renamed automatically because they may be globals or missing devirtualized upvalues.
 
-The scope tracker is intentionally conservative and is not a complete Luau AST or compiler.
+StyLua supplies the complete syntax-aware formatting path. The scope tracker used for renaming is still conservative and is not a complete Luau AST.
 
 ## Naming rules
 
@@ -68,6 +78,8 @@ Run the tests:
 ```bash
 python3 -m unittest discover -s tests -v
 ```
+
+CI installs the pinned StyLua release and tests both the AST formatter and the malformed-input fallback.
 
 For a user sample:
 
