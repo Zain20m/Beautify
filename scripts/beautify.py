@@ -111,6 +111,9 @@ class Binding:
     refs: list[int] = field(default_factory=list)
     function_body: str = ""
     function_context: str = ""
+    ast_features: dict[str, list[str]] = field(default_factory=dict)
+    inference_confidence: float = 0.0
+    name_evidence: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -594,7 +597,7 @@ def build_bindings(source: str, all_tokens: list[Token]):
                 return ast_tokens, ast_bindings, ast_declarations, ast_scopes, ast_diagnostics
         except Exception as exc:
             # Parser/tooling errors must not prevent the conservative fallback from running.
-            ast_error = f"Luau AST analysis unavailable for this file: {type(exc).__name__}"
+            ast_error = f"Luau AST analysis unavailable for this file: {type(exc).__name__}: {str(exc)[:180]}"
             tokens, bindings, declarations, scopes, diagnostics = _build_bindings_lexical(source, all_tokens)
             return tokens, bindings, declarations, scopes, diagnostics + [ast_error]
     return _build_bindings_lexical(source, all_tokens)
