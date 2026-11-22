@@ -37,7 +37,7 @@ print(v1)
 local function fn2(a1) return a1.Health end
 '''
         result = beautify.beautify(source, formatter="fallback")
-        self.assertIn('return value.Name', result)
+        self.assertIn('return localValue.Name', result)
         self.assertIn('return humanoid.Health', result)
         self.assertNotIn('a1', result)
 
@@ -49,9 +49,9 @@ local function fn2(a1) return a1.Health end
     def test_inline_blocks_and_semicolons_are_expanded(self):
         source = 'local function fn1(a1) if a1 then print(a1.Name) else print("end then v1") end end;local v1=Players:GetPlayers()'
         result = beautify.beautify(source, formatter="fallback")
-        self.assertIn('local function handleEvent(value)\n    if value then\n', result)
+        self.assertIn('local function eventHandler(localValue)\n    if localValue then\n', result)
         self.assertIn('        print("end then v1")', result)
-        self.assertIn('local value2 = Players:GetPlayers()', result)
+        self.assertIn('local localValue2 = Players:GetPlayers()', result)
 
     def test_member_names_and_string_literals_are_not_treated_as_locals(self):
         source = '''local v1 = {}
@@ -96,8 +96,8 @@ game:GetService("Players"):GetPlayers()
 local function fn2() local v2=3;return v2 end
 """
         result = beautify.beautify(source, formatter="fallback")
-        self.assertIn("""local function eventHandler(value)
-    if value then
+        self.assertIn("""local function eventHandler(localValue)
+    if localValue then
         return false
     else
         local localValue = 2
@@ -114,9 +114,9 @@ end""", result)
 
     def test_binary_operator_spacing_is_normalized(self):
         result = beautify.beautify('local v1=2;local v2=v1+ -1;if v2>=1 and v2~=3 then print("a==b") end', formatter="fallback")
-        self.assertIn('local value = 2', result)
-        self.assertIn('local value2 = value + -1', result)
-        self.assertIn('if value2 >= 1 and value2 ~= 3 then', result)
+        self.assertIn('local localValue = 2', result)
+        self.assertIn('local localValue2 = localValue + -1', result)
+        self.assertIn('if localValue2 >= 1 and localValue2 ~= 3 then', result)
         self.assertIn('print("a==b")', result)
 
     def test_unbound_generated_names_are_reported_not_guessed(self):
@@ -144,7 +144,7 @@ v1:WaitForChild("requests"):WaitForChild("character"):WaitForChild("spawn"):Fire
     def test_auto_falls_back_for_incomplete_devirtualized_input(self):
         source = 'local v1 = 1\nprint(v1)\nend\n'
         result, report = beautify.beautify(source, return_report=True, formatter="auto")
-        self.assertIn('local value = 1', result)
+        self.assertIn('local localValue = 1', result)
         self.assertIn('unmatched', " ".join(report["diagnostics"]))
         self.assertEqual(report["formatter_used"], "fallback")
         self.assertTrue(report["formatter_warning"])
