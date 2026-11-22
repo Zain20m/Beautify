@@ -1054,7 +1054,7 @@ def expand_multiline_tables(source: str) -> tuple[str, int]:
                 "bracket": bracket_depth,
                 "has_comma": False,
             })
-        elif value == "," and stack:
+        elif value == "," and len(stack) == 1:
             current = stack[-1]
             if paren_depth == current["paren"] and bracket_depth == current["bracket"]:
                 current["has_comma"] = True
@@ -1092,7 +1092,7 @@ def split_table_fields(source: str) -> tuple[str, int]:
             table_stack.append((paren_depth, bracket_depth))
         elif value == "}" and table_stack:
             table_stack.pop()
-        elif value == "," and table_stack:
+        elif value == "," and len(table_stack) == 1:
             table_paren, table_bracket = table_stack[-1]
             if paren_depth == table_paren and bracket_depth == table_bracket:
                 following = source[token.end:token.end + 1]
@@ -1220,6 +1220,7 @@ def beautify(
 
     chain_breaks = 0
     table_breaks = 0
+    expanded_tables = 0
     if formatter_used == "fallback":
         source, expanded_tables = expand_multiline_tables(source)
         source, table_breaks = split_table_fields(source)
