@@ -239,7 +239,7 @@ end
 print(v1)
 '''
         result, report = beautify.beautify(source, return_report=True, formatter="fallback")
-        self.assertEqual(report["ast_backend"], "tree-sitter-luau")
+        self.assertEqual(report["ast_backend"], "tree-sitter-luau", report)
         self.assertIn('local textValue = "outer"', result)
         self.assertIn('local textValue2 = "inner"', result)
         self.assertIn("print(textValue2)", result)
