@@ -1,20 +1,18 @@
 # Beautify
 
-Clean already-deobfuscated Roblox / Luau into readable source.
+Clean and semantically rename already-deobfuscated Roblox / Luau.
 
-The engine first performs conservative token- and scope-aware cleanup, then formats the complete file with StyLua's Luau parser when StyLua is installed. This gives consistent formatting for statements, expressions, tables, callbacks, chains, and control blocks. A fallback formatter remains available for malformed or incomplete decompiler output that cannot be parsed.
+Beautify builds a scope-aware binding map, improves generated and intermediate names from Roblox API usage and function behavior, removes only provably inert junk, then formats the whole file with StyLua when installed. A conservative fallback handles malformed or incomplete decompiler output.
 
 ## What it does
 
-- Renames scoped locals, function parameters, and loop variables such as `v12`, `tbl4`, `Arg2`, `_l173`, and `fn3`.
-- Uses context from `GetService`, `LocalPlayer`, `WaitForChild`, `Instance.new`, event connections, and recognizable function bodies.
-- Reuses declared service aliases, so repeated `game:GetService("ReplicatedStorage")` chains become `ReplicatedStorage` when that local is in scope.
-- Infers a missing service alias only when a known Roblox service name is used as an otherwise-unbound identifier.
-- Formats the whole Luau file, including multiline expressions, callbacks, tables, operators, method chains, and control blocks.
-- Reuses declared services instead of repeating `game:GetService(...)` where the matching local is in scope.
-- Falls back to a conservative best-effort formatter when incomplete decompiler output cannot be parsed.
-- Removes only narrowly recognized deobfuscator banners and standalone pure-noise statements.
-- Reports unbalanced blocks and unbound generated-looking names rather than silently deleting or guessing at them.
+- Renames locals, local functions, callback parameters, and loop variables by lexical binding, so shadowed variables stay separate.
+- Improves both obfuscator names (`v12`, `tbl4`, `Arg2`, `_l173`, `fn3`) and generic names from an earlier beautification pass (`handleEvent`, `sendRemoteEvent`, `value12`).
+- Infers function names from their full body and API usage, and value names from constructors, assignments, properties, and callback roles.
+- Reuses service aliases when the same service is requested again and the alias is in scope.
+- Removes only recognized banners, empty `do end` padding, standalone pure constant calls, and unused generated locals initialized with literal-only values.
+- Formats full Luau files, including expressions, callbacks, tables, method chains, operators, and control flow.
+- Reports parser failures, unmatched blocks, unresolved generated globals/upvalues, and removed junk counts.
 
 ## CLI
 
@@ -24,43 +22,41 @@ python3 scripts/beautify.py input.lua -o clean.lua --report --formatter auto
 
 Options:
 
-- `--formatter auto`: use StyLua when installed; otherwise use the fallback formatter.
-- `--formatter stylua`: require StyLua and the Luau parser. Fail instead of falling back.
-- `--formatter fallback`: force the built-in formatter, useful for malformed decompiler output.
-- `--no-semantic`: use neutral generated names instead of contextual names.
-- `--report`: print rename counts, formatter used, parse errors, remaining generated names, and structural diagnostics.
+- `--formatter auto`: use StyLua when installed; otherwise use the built-in fallback.
+- `--formatter stylua`: require StyLua's Luau parser and fail if it rejects the source.
+- `--formatter fallback`: force best-effort formatting for malformed output.
+- `--no-semantic`: disable contextual naming and use neutral renames.
+- `--report`: print rename counts, removed-junk counts, inferred service aliases, formatter details, and structural diagnostics.
 
-## Full formatting engine
+## Full formatter
 
-Install the pinned formatter with:
+Install StyLua:
 
 ```bash
 pip install git+https://github.com/JohnnyMorganz/StyLua@v2.6.0
 ```
 
-The repository includes `.stylua.toml` for four-space Luau formatting. The engine uses StyLua's parser/printer for valid source, then applies the preferred one-call-per-line method-chain layout. The fallback is for broken or partial decompiler output and cannot guarantee valid syntax.
+The checked-in `.stylua.toml` selects four-space Luau formatting. StyLua parses and formats complete valid Luau. The fallback is only a best-effort option for malformed decompiler output.
 
 ## Tests
-
-Run the regression suite with:
 
 ```bash
 python3 -m unittest discover -s tests -v
 ```
 
-The tests cover shadowed locals, callback parameters, literal preservation, service alias reuse, full formatting, method-chain wrapping, table formatting, malformed input, and unresolved generated names.
+Regression coverage includes lexical shadowing, callback parameters, semantic function naming, literal preservation, service alias reuse, full formatting, safe junk removal, and malformed-input diagnostics.
 
 ## Limits
 
-Beautify cleans recovered source. It is not a devirtualizer and cannot reconstruct missing VM expressions or repair failed decompilation. StyLua validates and formats syntactically valid Luau; fallback output is best-effort and may remain invalid when the original decompiler output is malformed. Unknown statements and suspicious fragments are preserved. When the structural report shows unmatched blocks, treat the result as incomplete and inspect the original deobfuscator output too.
+Beautify is not a VM devirtualizer and cannot reconstruct missing expressions or function bodies. It does not guess names for unbound globals or missing upvalues. A fallback-formatted file with unmatched block tokens is still incomplete source.
 
-## Skill
+## Skill and prompt
 
-Agents load [SKILL.md](./SKILL.md). The AI rewrite guidance is in [AI_PROMPT.md](./AI_PROMPT.md), with examples under [examples/](./examples/).
+Agents load [SKILL.md](./SKILL.md). The deeper AI-assisted naming and formatting guidance is in [AI_PROMPT.md](./AI_PROMPT.md). Examples are under [examples/](./examples/).
 
-## Discord / deobfuscation bots
+## Bot integration
 
-After a deobfuscation engine successfully returns source text, a bot may pass the output through `scripts/beautify.py` before delivering it. Keep the original result as a fallback. Do not report a successful recovery when the engine produced only a behavior trace or malformed partial output.
+After a deobfuscator returns Lua text, a bot may run `scripts/beautify.py` before delivery. Preserve the original output as a fallback. Do not present behavior traces or malformed fragments as successfully recovered source.
 
 ## License
 
