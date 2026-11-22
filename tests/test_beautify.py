@@ -268,14 +268,14 @@ print(v1)
         fixture = ROOT / "tests" / "fixtures" / "register_vm_style.lua"
         result, report = beautify.beautify(fixture.read_text(encoding="utf-8"), return_report=True, formatter="fallback")
         self.assertEqual(report["ast_backend"], "tree-sitter-luau", report)
-        self.assertIn("local function isCharacterAlive", result)
+        self.assertIn("local function getLivingHumanoid", result)
         self.assertGreater(report["ast_scope_count"], 1)
 
     def test_ast_parses_typed_luau_and_generic_functions(self):
         fixture = ROOT / "tests" / "fixtures" / "luau_typed_scopes.luau"
         result, report = beautify.beautify(fixture.read_text(encoding="utf-8"), return_report=True, formatter="fallback")
         self.assertEqual(report["ast_backend"], "tree-sitter-luau", report)
-        self.assertEqual(report["ast_syntax_errors"], 0)
+        self.assertEqual(report["ast_syntax_errors"], 0, report["syntax_error_nodes"])
         self.assertIn("type PlayerRecord", result)
         self.assertIn("local function", result)
 
@@ -286,7 +286,7 @@ print(v1)
             source = (fixtures / name).read_text(encoding="utf-8")
             _, report = beautify.beautify(source, return_report=True, formatter="fallback")
             self.assertEqual(report["ast_backend"], "tree-sitter-luau", (name, report))
-            self.assertEqual(report["ast_syntax_errors"], 0, name)
+            self.assertEqual(report["ast_syntax_errors"], 0, (name, report["syntax_error_nodes"]))
 
         partial_source = (fixtures / "partial_vm_lifter.lua").read_text(encoding="utf-8")
         _, partial_report = beautify.beautify(partial_source, return_report=True, formatter="fallback")
