@@ -92,21 +92,22 @@ game:GetService("Players"):GetPlayers()
         self.assertEqual(report["canonicalized_service_calls"], 1)
 
     def test_clean_indentation_and_function_spacing(self):
-        source = """local function fn1(a1) if a1 then return false else local v1=2 end end
+        source = """local function fn1(a1) if a1 then return false else local v1=2;print(v1) end end
 local function fn2() local v2=3;return v2 end
 """
         result = beautify.beautify(source, formatter="fallback")
-        self.assertIn("""local function handleEvent(value)
+        self.assertIn("""local function eventHandler(value)
     if value then
         return false
     else
-        local value2 = 2
+        local localValue = 2
+        print(localValue)
     end
 end
 
-local function handleEvent2()
-    local value3 = 3
-    return value3
+local function eventHandler2()
+    local localValue2 = 3
+    return localValue2
 end""", result)
         self.assertNotRegex(result, r"(?m)^        (?:end|else|elseif)\s*$")
         self.assertNotRegex(result, r"(?m)^.*[ \t]+$")
