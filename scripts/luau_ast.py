@@ -440,10 +440,16 @@ def build_ast_bindings(source: str, all_tokens: list, binding_type, scope_type, 
             partial_functions.append({"name": name, "line": line})
             diagnostics.append(f"Partially recovered function {name!r}; syntax error near line {line}.")
 
+    devirtualization_markers = [
+        {"line": line_number, "text": line.strip()}
+        for line_number, line in enumerate(source.splitlines(), start=1)
+        if re.search(r"\\bdevirt\\s*:", line, re.IGNORECASE)
+    ]
     metadata = {
         "ast_backend": "tree-sitter-luau",
         "ast_syntax_errors": len(syntax_nodes),
         "partial_functions": partial_functions,
+        "devirtualization_markers": devirtualization_markers,
         "possible_missing_upvalues": [
             {
                 "name": name,
@@ -469,5 +475,6 @@ def get_ast_report(source: str) -> dict:
         "ast_syntax_errors": None,
         "partial_functions": [],
         "possible_missing_upvalues": [],
+        "devirtualization_markers": [],
         "scope_count": 0,
     })
