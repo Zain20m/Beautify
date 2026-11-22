@@ -31,10 +31,11 @@ EMPTY_DO_RE = re.compile(r"^\s*do\s*end\s*;?\s*$")
 # Rename only local bindings with weak/generated names. The second group catches
 # common decompiler leftovers which the old v#/tbl#/Arg# matcher missed.
 GARBAGE_IDENT = re.compile(
-    r"^(?:v\d*|u\d+|p\d+|a\d+|r\d+|t\d+|t_\d+|f\d+|fn\d+|tbl\d*|arg|"
-    r"Arg\d+|arg\d+|var_\d+|_l\d+|[A-Z]_\d+|L_\d+|loc\d+|PROTO_\d+|"
-    r"STACK\d*|REGISTER\d*|R\d+|n\d*|flag\d*|thread\d*|connection\d*|"
-    r"lib\d*|tween\d*|paragraph\d*|cFrame)$", re.I
+    r"^(?:v\d*|V\d*|u\d+|U\d+|p\d+|P\d+|a\d+|A\d+|r\d+|R\d+|"
+    r"t\d+|T\d+|t_\d+|T_\d+|f\d+|F\d+|fn\d+|FN\d+|tbl\d*|Tbl\d*|"
+    r"arg|Arg\d+|arg\d+|ARG\d+|var_\d+|_l\d+|L_\d+|[A-Z]_\d+|loc\d+|"
+    r"PROTO_\d+|STACK\d*|REGISTER\d*|R\d+|n\d*|flag\d*|thread\d*|"
+    r"connection\d*|lib\d*|tween\d*|paragraph\d*|cFrame)$"
 )
 
 KEYWORDS = {
@@ -213,22 +214,39 @@ def matching(tokens: list[Token], index: int, opening: str, closing: str) -> int
 
 
 def _statement_end(tokens: list[Token], start: int) -> int:
-    """Return the first token after a conservative local declaration statement."""
+    """Find the next statement boundary without swallowing a following block."""
     if start >= len(tokens):
         return start
     paren = bracket = brace = block = 0
-    continuation = {"=", ",", ".", ":", "+", "-", "*", "/", "//", "%", "^", "..", "and", "or", "not", "return", "then", "do", "(", "{", "["}
+    continuation = {
+        "=", ",", ".", ":", "+", "-", "*", "/", "//", "%", "^", "..",
+        "and", "or", "not", "return", "then", "do", "(", "{", "[",
+    }
     statement_words = {"local", "function", "if", "for", "while", "repeat", "return", "break", "continue", "do"}
     last_line = tokens[start].line
     j = start
     while j < len(tokens):
         v = tokens[j].value
-        if v == "(" : paren += 1
-        elif v == ")": paren = max(0, paren - 1)
-        elif v == "[": bracket += 1
-        elif v == "]": bracket = max(0, bracket - 1)
-        elif v == "{": brace += 1
-        elif v == "}": brace = max(0, brace - 1)
+        if j > start and paren == bracket == brace == block == 0:
+            previous = tokens[j - 1].value
+            if previous == ";":
+                return j
+            if tokens[j].line > last_line and previous not in continuation and v not in {".", ":", ",", ")", "]", "}", "and", "or"}:
+                return j
+            if v in statement_words and tokens[j].line == last_line and previous not in continuation:
+                return j
+        if v == "(":
+            paren += 1
+        elif v == ")":
+            paren = max(0, paren - 1)
+        elif v == "[":
+            bracket += 1
+        elif v == "]":
+            bracket = max(0, bracket - 1)
+        elif v == "{":
+            brace += 1
+        elif v == "}":
+            brace = max(0, brace - 1)
         elif v in ("function", "if", "repeat"):
             block += 1
         elif v == "do":
@@ -236,15 +254,6 @@ def _statement_end(tokens: list[Token], start: int) -> int:
                 block += 1
         elif v in ("end", "until"):
             block = max(0, block - 1)
-        if j > start and paren == bracket == brace == block == 0:
-            if tokens[j - 1].value == ";":
-                return j
-            if tokens[j].line > last_line:
-                if tokens[j - 1].value not in continuation and v not in {".", ":", ",", ")", "]", "}", "and", "or"}:
-                    return j
-            if v in statement_words and tokens[j].line == last_line:
-                if tokens[j - 1].value not in continuation:
-                    return j
         last_line = max(last_line, tokens[j].line)
         j += 1
     return len(tokens)
@@ -541,8 +550,9 @@ def infer_missing_services(
     first_code = tokens[0].start if tokens else len(source)
     prefix, body = source[:first_code], source[first_code:]
     aliases = "\n".join(f'local {name} = game:GetService("{name}")' for name in missing)
-    spacer = "\n" if prefix and not prefix.endswith("\n") else ""
-    return prefix + spacer + aliases + "\n\n" + body, missing
+    spacer = "" if not prefix or prefix.endswith("\n") else "\n"
+    # Keep inferred aliases adjacent to service declarations already at the top.
+    return prefix + spacer + aliases + "\n" + body, missing
 
 
 def _token_slice(source: str, tokens: list[Token], start_index: int, end_index: int) -> str:
@@ -787,15 +797,25 @@ def strip_pure_junk(source: str) -> str:
 
 
 def split_semicolons(source: str) -> str:
-    """Move statements separated by semicolons onto individual lines, outside strings/comments."""
-    toks = lex(source)
-    insertions = []
-    for tok in toks:
-        if tok.value == ";":
-            insertions.append(tok.end)
-    for pos in reversed(insertions):
-        if pos < len(source) and source[pos] not in "\r\n":
-            source = source[:pos] + "\n" + source[pos:]
+    """Expand statement separators; retain table semicolons as commas."""
+    tokens = lex(source)
+    depth = 0
+    replacements: list[tuple[int, int, str]] = []
+    for index, tok in enumerate(tokens):
+        if tok.value == "{":
+            depth += 1
+        elif tok.value == "}":
+            depth = max(0, depth - 1)
+        elif tok.value == ";":
+            following = source[tok.end:tok.end + 1]
+            if depth > 0:
+                next_token = tokens[index + 1].value if index + 1 < len(tokens) else ""
+                replacement = "" if next_token == "}" else ","
+            else:
+                replacement = "" if following in ("\n", "\r") else "\n"
+            replacements.append((tok.start, tok.end, replacement))
+    for start, end, replacement in reversed(replacements):
+        source = source[:start] + replacement + source[end:]
     return source
 
 
@@ -810,7 +830,9 @@ def split_control_blocks(source: str) -> str:
         line_start = source.rfind("\n", 0, tok.start) + 1
         has_code_before = bool(source[line_start:tok.start].strip())
         if value in ("local", "if", "for", "while", "repeat", "return", "end", "else", "elseif", "until") and has_code_before:
-            if value != "local" or (index > 0 and tokens[index - 1].value not in ("local", "function")):
+            previous = tokens[index - 1].value if index > 0 else ""
+            already_after_opener = previous in ("then", "do", "else", "repeat", ";")
+            if not already_after_opener and (value != "local" or (index > 0 and previous not in ("local", "function"))):
                 insertions.add(tok.start)
         if value in ("then", "do", "else", "repeat"):
             line_end = source.find("\n", tok.end)
@@ -825,18 +847,33 @@ def split_control_blocks(source: str) -> str:
 
 
 def normalize_spacing(source: str) -> str:
-    """Normalize commas and plain assignment spacing without rewriting literals."""
-    edits: list[tuple[int, str]] = []
-    for tok in lex(source):
+    """Normalize punctuation and binary operators without touching strings/comments."""
+    tokens = lex(source)
+    edits: dict[int, str] = {}
+    binary_ops = {
+        "=", "==", "~=", "<", ">", "<=", ">=", "+", "-", "*", "/", "//",
+        "%", "^", "..", "+=", "-=", "*=", "/=", "%=", "^=",
+    }
+    unary_predecessors = {
+        "", "(", "[", "{", ",", ";", "=", "==", "~=", "<", ">", "<=", ">=",
+        "+", "-", "*", "/", "//", "%", "^", "..", "and", "or", "not",
+        "then", "do", "return", "local", "in",
+    }
+    for index, tok in enumerate(tokens):
+        previous = tokens[index - 1].value if index else ""
         if tok.value == ",":
             if tok.end < len(source) and source[tok.end] not in " \t\r\n":
-                edits.append((tok.end, " "))
-        elif tok.value == "=":
-            if tok.start > 0 and source[tok.start - 1] not in " \t\r\n":
-                edits.append((tok.start, " "))
-            if tok.end < len(source) and source[tok.end] not in " \t\r\n":
-                edits.append((tok.end, " "))
-    for position, value in sorted(edits, reverse=True):
+                edits[tok.end] = " "
+            continue
+        if tok.value not in binary_ops and tok.value not in ("and", "or"):
+            continue
+        if tok.value in ("+", "-") and previous in unary_predecessors:
+            continue
+        if tok.start > 0 and source[tok.start - 1] not in " \t\r\n":
+            edits[tok.start] = " "
+        if tok.end < len(source) and source[tok.end] not in " \t\r\n":
+            edits[tok.end] = " "
+    for position, value in sorted(edits.items(), reverse=True):
         source = source[:position] + value + source[position:]
     return source
 
@@ -870,6 +907,102 @@ def indent_source(source: str) -> str:
     return "\n".join(out)
 
 
+
+def _scope_distance(scope: Scope | None, ancestor: Scope) -> int | None:
+    distance = 0
+    current = scope
+    while current is not None:
+        if current is ancestor:
+            return distance
+        current = current.parent
+        distance += 1
+    return None
+
+
+def canonicalize_service_calls(source: str) -> tuple[str, int]:
+    """Reuse an in-scope GetService local instead of repeating game:GetService()."""
+    tokens, bindings, _, token_scopes, _ = build_bindings(source, lex(source))
+    service_bindings: list[tuple[Binding, str]] = []
+    for binding in bindings:
+        i = binding.token_index
+        if binding.role != "local" or i + 7 >= len(tokens):
+            continue
+        seq = tokens[i:i + 8]
+        if [t.value for t in seq[1:7]] != ["=", "game", ":", "GetService", "(", seq[6].value]:
+            continue
+        if seq[6].kind != "string" or seq[7].value != ")":
+            continue
+        service_name = seq[6].value[1:-1]
+        if service_name in SERVICE_NAMES:
+            service_bindings.append((binding, service_name))
+    if not service_bindings:
+        return source, 0
+
+    replacements: list[tuple[int, int, str]] = []
+    for i in range(len(tokens) - 6):
+        seq = tokens[i:i + 7]
+        if [t.value for t in seq[:6]] != ["game", ":", "GetService", "(", seq[4].value, ")"]:
+            continue
+        if seq[4].kind != "string":
+            continue
+        service_name = seq[4].value[1:-1]
+        if service_name not in SERVICE_NAMES:
+            continue
+        scope = token_scopes.get(i)
+        visible = []
+        for binding, bound_service in service_bindings:
+            if bound_service != service_name or tokens[i].start < binding.active_from:
+                continue
+            distance = _scope_distance(scope, binding.scope)
+            if distance is None or tokens[i].start >= binding.scope.end:
+                continue
+            visible_names = []
+            for candidate in bindings:
+                if candidate.name != binding.name or tokens[i].start < candidate.active_from:
+                    continue
+                candidate_distance = _scope_distance(scope, candidate.scope)
+                if candidate_distance is not None and tokens[i].start < candidate.scope.end:
+                    visible_names.append((candidate_distance, -candidate.active_from, candidate))
+            if visible_names:
+                nearest = min(visible_names, key=lambda item: (item[0], item[1]))[2]
+                if nearest is not binding:
+                    continue
+            visible.append((distance, -binding.active_from, binding))
+        if visible:
+            binding = min(visible, key=lambda item: (item[0], item[1]))[2]
+            replacements.append((seq[0].start, seq[5].end, binding.name))
+    for start, end, replacement in sorted(replacements, reverse=True):
+        source = source[:start] + replacement + source[end:]
+    return source, len(replacements)
+
+
+def add_top_level_section_spacing(source: str) -> str:
+    """Separate top-level helper functions while preserving source order."""
+    out: list[str] = []
+    for line in source.splitlines():
+        stripped = line.strip()
+        is_top_level_function = bool(re.match(r"^(?:local\\s+)?function\\b", stripped)) and not line[:1].isspace()
+        if is_top_level_function and out and out[-1].strip():
+            out.append("")
+        out.append(line.rstrip())
+    return "\n".join(out)
+
+
+def find_unresolved_generated_identifiers(source: str) -> list[str]:
+    """Find generated-looking bare identifiers with no local declaration."""
+    tokens = significant(lex(source))
+    _, _, declarations, _, _ = build_bindings(source, lex(source))
+    unresolved: set[str] = set()
+    for index, tok in enumerate(tokens):
+        if tok.kind != "ident" or not GARBAGE_IDENT.fullmatch(tok.value):
+            continue
+        if index in declarations:
+            continue
+        if index > 0 and tokens[index - 1].value in (".", ":"):
+            continue
+        unresolved.add(tok.value)
+    return sorted(unresolved, key=str.lower)
+
 def collapse_blank_lines(source: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", source).strip() + "\n"
 
@@ -897,9 +1030,9 @@ def beautify(source: str, aggressive: bool = True, semantic: bool = True, return
     rename_stats: dict[str, int] = {}
     diagnostics: list[str] = []
     inferred_services: list[str] = []
+    canonicalized_service_calls = 0
     if aggressive or semantic:
-        all_tokens = lex(source)
-        tokens, bindings, decl_tokens, token_scopes, diagnostics = build_bindings(source, all_tokens)
+        tokens, bindings, decl_tokens, token_scopes, diagnostics = build_bindings(source, lex(source))
         source, inferred_services = infer_missing_services(source, tokens, bindings, decl_tokens, token_scopes)
         if inferred_services:
             tokens, bindings, decl_tokens, _, refreshed_diagnostics = build_bindings(source, lex(source))
@@ -907,23 +1040,35 @@ def beautify(source: str, aggressive: bool = True, semantic: bool = True, return
         if semantic:
             source, rename_stats = rename_bindings(source, tokens, bindings, decl_tokens)
         else:
-            for b in bindings:
-                if GARBAGE_IDENT.fullmatch(b.name):
-                    b.hint = "value"
+            for binding in bindings:
+                if GARBAGE_IDENT.fullmatch(binding.name):
+                    binding.hint = "value"
             source, rename_stats = rename_bindings(source, tokens, bindings, decl_tokens)
+        source, canonicalized_service_calls = canonicalize_service_calls(source)
+
+    unresolved_generated = find_unresolved_generated_identifiers(source)
+    if unresolved_generated:
+        diagnostics.append("unbound generated-looking identifiers retained: " + ", ".join(unresolved_generated))
     source = indent_source(source)
+    source = add_top_level_section_spacing(source)
     source = collapse_blank_lines(source)
     if not source.startswith("-- Beautified"):
         source = "-- Beautified from deobfuscator output\n\n" + source
     if diagnostics:
-        notes = "\n".join("-- Beautifier note: " + x for x in diagnostics)
+        notes = "\n".join("-- Beautifier note: " + item for item in diagnostics)
         source = source.replace("-- Beautified from deobfuscator output\n", "-- Beautified from deobfuscator output\n" + notes + "\n")
+    remaining_garbage = sum(
+        1 for tok in significant(lex(source))
+        if tok.kind == "ident" and GARBAGE_IDENT.fullmatch(tok.value)
+    )
     report = {
         "renamed_bindings": sum(rename_stats.values()),
         "renamed_names": len(rename_stats),
         "inferred_services": inferred_services,
+        "canonicalized_service_calls": canonicalized_service_calls,
+        "unresolved_generated_identifiers": unresolved_generated,
         "diagnostics": diagnostics,
-        "remaining_garbage": len(GARBAGE_IDENT.findall(" ".join(t.value for t in lex(source)))),
+        "remaining_garbage": remaining_garbage,
     }
     return (source, report) if return_report else source
 
