@@ -44,6 +44,8 @@ Never use a name that contradicts the function's actual body. Keep generated rep
 
 ## Formatting
 
+Use StyLua 2.6.0 or newer with Luau syntax for full-file formatting whenever available. If a parser rejects malformed decompiler output, use the fallback formatter and keep the original errors visible.
+
 1. Expand semicolon-separated statements.
 2. Split inline `if`, `else`, `then`, `do`, `repeat`, `until`, and `end` blocks where safe.
 3. Use consistent four-space indentation.
