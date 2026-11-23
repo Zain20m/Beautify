@@ -817,6 +817,16 @@ def infer_semantic_value_name(
         "proximityprompt": "proximityPrompt",
         "billboardgui": "billboardGui",
         "highlight": "highlight",
+        "frame": "frame",
+        "textlabel": "textLabel",
+        "textbutton": "textButton",
+        "imagelabel": "imageLabel",
+        "imagebutton": "imageButton",
+        "scrollingframe": "scrollingFrame",
+        "uilistlayout": "uiListLayout",
+        "uigridlayout": "uiGridLayout",
+        "uipadding": "uiPadding",
+        "uiaspectratioconstraint": "uiAspectRatioConstraint",
     }
     for class_name, variable_name in constructor_names.items():
         if f'instance.new("{class_name}")' in init_low or f"instance.new('{class_name}')" in init_low:
@@ -1683,6 +1693,7 @@ def beautify(
     else:
         source, chain_breaks = split_chained_calls(source)
         source = add_top_level_section_spacing(source)
+    source = compact_generated_ui_spacing(source)
     source = collapse_blank_lines(source)
 
     if not source.startswith("-- Beautified"):
