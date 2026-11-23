@@ -26,6 +26,35 @@ print(s68)
         self.assertIn('Value = "s69"', result)
         self.assertEqual(report["remaining_garbage"], 0)
 
+    def test_generated_ui_instance_locals_are_renamed_semantically(self):
+        source = '''local Frame183 = Instance.new("Frame")
+Frame183.BackgroundTransparency = 1
+local TextLabel120 = Instance.new("TextLabel")
+TextLabel120.Text = "Hello"
+local UIListLayout46 = Instance.new("UIListLayout")
+UIListLayout46.Padding = UDim.new(0, 6)
+'''
+        result, report = beautify.beautify(source, return_report=True, formatter="fallback")
+        self.assertIn("local frame = Instance.new(\"Frame\")", result)
+        self.assertIn("local textLabel = Instance.new(\"TextLabel\")", result)
+        self.assertIn("local uiListLayout = Instance.new(\"UIListLayout\")", result)
+        self.assertNotRegex(result, r"\\b(?:Frame183|TextLabel120|UIListLayout46)\\b")
+        self.assertEqual(report["remaining_garbage"], 0)
+
+    def test_generated_ui_property_spacing_is_compacted(self):
+        source = '''local Frame183 = Instance.new("Frame")
+
+Frame183.BackgroundTransparency = 1
+
+Frame183.AutomaticSize = Enum.AutomaticSize.Y
+
+Frame183.Size = UDim2.new(1, 0, 0, 0)
+'''
+        result = beautify.beautify(source, formatter="fallback")
+        self.assertIn("frame.BackgroundTransparency = 1\\nframe.AutomaticSize", result)
+        self.assertIn("frame.AutomaticSize = Enum.AutomaticSize.Y\\nframe.Size", result)
+        self.assertNotIn("BackgroundTransparency = 1\\n\\n", result)
+
     def test_shadowed_locals_get_separate_bindings(self):
         source = '''local v1 = game:GetService("Players")
 do
