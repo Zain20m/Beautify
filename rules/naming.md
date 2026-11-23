@@ -4,7 +4,7 @@
 
 Rename scoped locals, local functions, parameters, and loop variables only when their names are generated or weak.
 
-Common obfuscator names: `v1`, `v12`, `t_1`, `tbl4`, `Arg2`, `_l173`, `PROTO_5`, `UPVALUE_3`, `fn2`.
+Common obfuscator names: `v1`, `v12`, `t_1`, `s68`, `tbl4`, `Arg2`, `_l173`, `PROTO_5`, `UPVALUE_3`, `fn2`.
 
 Weak earlier-pass names: `handleEvent`, `sendRemoteEvent`, `value12`, `numericValue2`, `eventConnection`.
 
