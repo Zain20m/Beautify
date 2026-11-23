@@ -1566,7 +1566,7 @@ def collapse_blank_lines(source: str) -> str:
 
 
 GENERATED_UI_REFERENCE = re.compile(
-    r"\b(?:Frame|TextLabel|TextButton|ImageLabel|ImageButton|"
+    r"\b(?:(?:Frame|TextLabel|TextButton|ImageLabel|ImageButton|"
     r"ScrollingFrame|ScreenGui|UI[A-Z][A-Za-z0-9]*)\d+|"
     r"frame|textLabel|textButton|imageLabel|imageButton|scrollingFrame|screenGui|ui[A-Z][A-Za-z0-9]*)\b"
 )
