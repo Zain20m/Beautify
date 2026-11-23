@@ -15,7 +15,7 @@ import tree_sitter_luau
 
 WEAK_NAME = re.compile(
     r"^(?:v\d*|u\d+|p\d+|a\d+|r\d+|t\d+|t_\d+|f\d+|fn\d+|tbl\d*|"
-    r"arg\d*|Arg\d+|var_\d+|_l\d+|[A-Z]_\d+|L_\d+|loc\d+|"
+    r"arg\d*|Arg\d+|s\d+|S\d+|var_\d+|_l\d+|[A-Z]_\d+|L_\d+|loc\d+|"
     r"PROTO_\d+|STACK\d*|REGISTER\d*|R\d+|n\d*|flag\d*|"
     r"handleEvent\d*|sendRemoteEvent\d*|value\d*|numericValue\d*|"
     r"remoteArgument\d*|eventConnection\d*|isFeatureEnabled\d*|"
