@@ -2,7 +2,7 @@ name: Beautifier tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, test/lyra-ui-formatter-run]
   pull_request:
 
 jobs:
