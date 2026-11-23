@@ -48,6 +48,7 @@ GARBAGE_IDENT = re.compile(
     r"arg|Arg\d+|arg\d+|ARG\d+|var_\d+|_l\d+|L_\d+|[A-Z]_\d+|loc\d+|"
     r"PROTO_\d+|STACK\d*|REGISTER\d*|R\d+|n\d*|flag\d*|thread\d*|"
     r"connection\d*|lib\d*|tween\d*|paragraph\d*|cFrame|"
+    r"(?:Frame|TextLabel|TextButton|ImageLabel|ImageButton|ScrollingFrame|ScreenGui|UI[A-Z][A-Za-z0-9]*)\d+|"
     r"handleEvent\d*|sendRemoteEvent\d*|value\d*|numericValue\d*|"
     r"remoteArgument\d*|argument\d*|item\d*|eventConnection\d*|isFeatureEnabled\d*)$"
 )
@@ -811,12 +812,20 @@ def infer_semantic_value_name(
         "bodymover": "bodyMover",
         "screengui": "screenGui",
         "textbutton": "textButton",
-        "textlabel": "textLabel",
         "uicorner": "uiCorner",
         "uistroke": "uiStroke",
         "proximityprompt": "proximityPrompt",
         "billboardgui": "billboardGui",
         "highlight": "highlight",
+        "frame": "frame",
+        "textlabel": "textLabel",
+        "imagelabel": "imageLabel",
+        "imagebutton": "imageButton",
+        "scrollingframe": "scrollingFrame",
+        "uilistlayout": "uiListLayout",
+        "uigridlayout": "uiGridLayout",
+        "uipadding": "uiPadding",
+        "uiaspectratioconstraint": "uiAspectRatioConstraint",
     }
     for class_name, variable_name in constructor_names.items():
         if f'instance.new("{class_name}")' in init_low or f"instance.new('{class_name}')" in init_low:
@@ -1551,7 +1560,41 @@ def format_with_stylua(source: str, timeout: int = 45) -> tuple[str | None, str 
     return completed.stdout, None
 
 def collapse_blank_lines(source: str) -> str:
+    """Normalize whitespace-only lines and cap repeated vertical gaps."""
+    source = re.sub(r"(?m)^[ \t]+$", "", source)
     return re.sub(r"\n{3,}", "\n\n", source).strip() + "\n"
+
+
+GENERATED_UI_REFERENCE = re.compile(
+    r"\b(?:Frame\d+|TextLabel\d+|TextButton\d+|ImageLabel\d+|ImageButton\d+|"
+    r"ScrollingFrame\d+|ScreenGui\d+|UIListLayout\d+|UIGridLayout\d+|"
+    r"UIPadding\d+|UICorner\d+|UIStroke\d+|frame|textLabel|textButton|"
+    r"imageLabel|imageButton|scrollingFrame|screenGui|uiListLayout|"
+    r"uiGridLayout|uiPadding|uiCorner|uiStroke)\b"
+)
+
+
+def compact_generated_ui_spacing(source: str) -> str:
+    """Remove blank gaps between adjacent generated Roblox UI setup lines."""
+    lines = source.splitlines()
+    out: list[str] = []
+    for index, line in enumerate(lines):
+        if line.strip():
+            out.append(line.rstrip())
+            continue
+        previous = next((item for item in reversed(out) if item.strip()), "")
+        following = next((item for item in lines[index + 1:] if item.strip()), "")
+        if (
+            previous
+            and following
+            and not previous.lstrip().startswith("--")
+            and not following.lstrip().startswith("--")
+            and GENERATED_UI_REFERENCE.search(previous)
+            and GENERATED_UI_REFERENCE.search(following)
+        ):
+            continue
+        out.append("")
+    return "\n".join(out)
 
 
 def is_trace_only(source: str) -> bool:
@@ -1683,6 +1726,7 @@ def beautify(
     else:
         source, chain_breaks = split_chained_calls(source)
         source = add_top_level_section_spacing(source)
+    source = compact_generated_ui_spacing(source)
     source = collapse_blank_lines(source)
 
     if not source.startswith("-- Beautified"):
