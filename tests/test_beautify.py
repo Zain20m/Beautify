@@ -38,7 +38,7 @@ UIListLayout46.Padding = UDim.new(0, 6)
         self.assertIn("local frame = Instance.new(\"Frame\")", result)
         self.assertIn("local textLabel = Instance.new(\"TextLabel\")", result)
         self.assertIn("local uiListLayout = Instance.new(\"UIListLayout\")", result)
-        self.assertNotRegex(result, r"\\b(?:Frame183|TextLabel120|UIListLayout46)\\b")
+        self.assertNotRegex(result, r"\b(?:Frame183|TextLabel120|UIListLayout46)\b")
         self.assertEqual(report["remaining_garbage"], 0)
 
     def test_generated_ui_property_spacing_is_compacted(self):
@@ -51,9 +51,9 @@ Frame183.AutomaticSize = Enum.AutomaticSize.Y
 Frame183.Size = UDim2.new(1, 0, 0, 0)
 '''
         result = beautify.beautify(source, formatter="fallback")
-        self.assertIn("frame.BackgroundTransparency = 1\\nframe.AutomaticSize", result)
-        self.assertIn("frame.AutomaticSize = Enum.AutomaticSize.Y\\nframe.Size", result)
-        self.assertNotIn("BackgroundTransparency = 1\\n\\n", result)
+        self.assertIn("frame.BackgroundTransparency = 1\nframe.AutomaticSize", result)
+        self.assertIn("frame.AutomaticSize = Enum.AutomaticSize.Y\nframe.Size", result)
+        self.assertNotIn("BackgroundTransparency = 1\n\n", result)
 
     def test_shadowed_locals_get_separate_bindings(self):
         source = '''local v1 = game:GetService("Players")
