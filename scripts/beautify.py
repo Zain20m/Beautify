@@ -44,7 +44,7 @@ EMPTY_DO_RE = re.compile(r"^\s*do\s*end\s*;?\s*$")
 # common decompiler leftovers which the old v#/tbl#/Arg# matcher missed.
 GARBAGE_IDENT = re.compile(
     r"^(?:v\d*|V\d*|u\d+|U\d+|p\d+|P\d+|a\d+|A\d+|r\d+|R\d+|"
-    r"t\d+|T\d+|t_\d+|T_\d+|f\d+|F\d+|fn\d+|FN\d+|tbl\d*|Tbl\d*|"
+    r"t\d+|T\d+|t_\d+|T_\d+|s\d+|S\d+|f\d+|F\d+|fn\d+|FN\d+|tbl\d*|Tbl\d*|"
     r"arg|Arg\d+|arg\d+|ARG\d+|var_\d+|_l\d+|L_\d+|[A-Z]_\d+|loc\d+|"
     r"PROTO_\d+|STACK\d*|REGISTER\d*|R\d+|n\d*|flag\d*|thread\d*|"
     r"connection\d*|lib\d*|tween\d*|paragraph\d*|cFrame|"
