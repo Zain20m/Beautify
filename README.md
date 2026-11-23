@@ -7,7 +7,7 @@ Beautify uses a Tree-sitter Luau syntax tree for lexical-scope analysis when the
 ## What it does
 
 - AST-backed binding resolution for locals, local functions, callback parameters, generic/numeric loop variables, nested blocks, and repeat scopes.
-- Contextual naming for obfuscator names and earlier Beautify placeholders, using function bodies, AST calls/members, constructors, reference sites, and callback context.
+- Contextual naming for obfuscator names and earlier Beautify placeholders, using function bodies, AST calls/members, constructors, reference sites, and callback context. Includes numbered `s`-style generated locals such as `s68`.
 - Confidence/evidence fields for semantic name suggestions, with neutral fallbacks when evidence is weak.
 - Service alias reuse when the original local is visible and not shadowed.
 - Safe junk removal limited to known banners, empty padding, standalone pure constants, and unused generated locals initialized only by literals.
