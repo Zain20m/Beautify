@@ -3,7 +3,7 @@ name: beautify
 description: AST-aware whole-file semantic renaming, formatting, and conservative cleanup for already-deobfuscated Roblox Luau.
 license: MIT
 metadata:
-  version: "6.1"
+  version: "6.2"
   focus: roblox-luau-ast-cleanup
 ---
 
@@ -40,6 +40,7 @@ Do not describe the fallback scanner as AST validation. The report identifies th
 Process the complete file, not just visible or top-level names.
 
 - Keep meaningful names as written.
+- Recognize numbered generated locals such as `s68` alongside `v1`, `t_1`, and `fn2`.
 - Rename generated and weak intermediate names by binding, not global string replacement.
 - Score function-name candidates from AST call/member/string evidence and the complete function body. Prefer action + target names only when evidence supports the behavior.
 - Infer parameters from event/callback roles and their own reference sites.
