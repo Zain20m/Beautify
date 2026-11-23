@@ -32,3 +32,14 @@ jobs:
         run: |
           python scripts/beautify.py examples/before.lua -o /tmp/beautified.lua --formatter stylua --report
           python scripts/beautify.py examples/before_extreme.lua -o /tmp/beautified-extreme.lua --formatter stylua --report
+      - name: Run Beautify on isolated Lyra GUI excerpt
+        if: matrix.python-version == '3.12'
+        run: |
+          python scripts/beautify.py tests/fixtures/lyra_ui_excerpt.lua -o /tmp/lyra_ui_excerpt.beautified.lua --formatter stylua --report
+      - name: Upload actual Beautify output
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lyra-ui-beautify-output
+          path: /tmp/lyra_ui_excerpt.beautified.lua
+          if-no-files-found: error
