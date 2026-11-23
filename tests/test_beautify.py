@@ -16,6 +16,16 @@ class BeautifyTests(unittest.TestCase):
         self.assertIn('print(textValue)', result)
         self.assertEqual(report["remaining_garbage"], 0)
 
+    def test_s_numbered_generated_locals_are_renamed_but_properties_and_strings_are_preserved(self):
+        source = '''local s68 = {}
+s68.Value = "s69"
+print(s68)
+'''
+        result, report = beautify.beautify(source, return_report=True, formatter="fallback")
+        self.assertNotIn("s68", result)
+        self.assertIn('Value = "s69"', result)
+        self.assertEqual(report["remaining_garbage"], 0)
+
     def test_shadowed_locals_get_separate_bindings(self):
         source = '''local v1 = game:GetService("Players")
 do
